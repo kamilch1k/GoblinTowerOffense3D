@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Goblin Tower Offense 3D</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="world"></canvas>
+
+      <header class="top-hud" aria-label="Battle status">
+        <section class="status-block">
+          <span class="status-label">Stronghold</span>
+          <span id="baseReadout" class="status-value">100%</span>
+          <div class="meter" aria-hidden="true"><span id="baseMeter"></span></div>
+        </section>
+        <section class="status-block">
+          <span class="status-label">Rage</span>
+          <span id="rageReadout" class="status-value">0 / 10</span>
+          <div class="meter rage" aria-hidden="true"><span id="rageMeter"></span></div>
+        </section>
+        <section class="status-block compact">
+          <span class="status-label">Raid</span>
+          <span id="raidReadout" class="status-value">00:00</span>
+        </section>
+      </header>
+
+      <nav class="camera-tools" aria-label="Camera controls">
+        <button id="rotateLeft" class="icon-button" title="Rotate left" aria-label="Rotate left">
+          <i data-lucide="rotate-ccw"></i>
+        </button>
+        <button id="rotateRight" class="icon-button" title="Rotate right" aria-label="Rotate right">
+          <i data-lucide="rotate-cw"></i>
+        </button>
+        <button id="resetView" class="icon-button" title="Reset view" aria-label="Reset view">
+          <i data-lucide="home"></i>
+        </button>
+        <button id="pauseToggle" class="icon-button" title="Pause" aria-label="Pause">
+          <i data-lucide="pause"></i>
+        </button>
+      </nav>
+
+      <aside class="war-panel" aria-label="Raid details">
+        <div class="panel-row">
+          <span>Goblins</span>
+          <strong id="hordeReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Defenders</span>
+          <strong id="defenderReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Structures</span>
+          <strong id="structureReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Spoils</span>
+          <strong id="spoilsReadout">0</strong>
+        </div>
+      </aside>
+
+      <main id="battleMessage" class="battle-message" aria-live="polite"></main>
+
+      <section id="deck" class="deck" aria-label="Troop cards"></section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
