@@ -28,7 +28,9 @@ const pauseToggle = document.querySelector("#pauseToggle");
 
 const MAP_SIZE = 36;
 const HALF_MAP = MAP_SIZE / 2;
-const SPAWN_BAND = 4.2;
+const SPAWN_BAND = 5;
+const SPAWN_DROP_TOLERANCE = 1.5;
+const SPAWN_EDGE_PADDING = 0.72;
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -150,19 +152,38 @@ function atlasTile(col, row, cols = 4, rows = 4, source = blockAtlas, cachePrefi
   return texture;
 }
 
+function atlasSlice(col, row, slice, cols = 4, rows = 4, source = blockAtlas, cachePrefix = "slice") {
+  const key = `${cachePrefix}-${col}-${row}-${slice.x}-${slice.y}-${slice.width}-${slice.height}-${cols}-${rows}`;
+  if (textureCache.has(key)) return textureCache.get(key);
+  const texture = source.clone();
+  texture.repeat.set(slice.width / cols, slice.height / rows);
+  texture.offset.set((col + slice.x) / cols, 1 - (row + slice.y + slice.height) / rows);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  textureCache.set(key, texture);
+  return texture;
+}
+
+const ISO_TOP_SLICE = { x: 0.04, y: 0.02, width: 0.92, height: 0.58 };
+const ISO_SIDE_SLICE = { x: 0.04, y: 0.57, width: 0.92, height: 0.41 };
+const FLAT_GROUND_SLICE = { x: 0.04, y: 0.04, width: 0.92, height: 0.92 };
+
 const materials = {
-  grassTop: new THREE.MeshStandardMaterial({ map: atlasTile(0, 0), roughness: 0.96 }),
+  grassTop: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 0, ISO_TOP_SLICE), roughness: 0.96 }),
+  grassSide: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 0, ISO_SIDE_SLICE), roughness: 0.98 }),
   dirt: new THREE.MeshStandardMaterial({ map: atlasTile(1, 0), roughness: 0.98 }),
   stone: new THREE.MeshStandardMaterial({ map: atlasTile(2, 0), roughness: 0.9 }),
   cobble: new THREE.MeshStandardMaterial({ map: atlasTile(3, 0), roughness: 0.92 }),
   wood: new THREE.MeshStandardMaterial({ map: atlasTile(0, 1), roughness: 0.86 }),
   thatch: new THREE.MeshStandardMaterial({ map: atlasTile(1, 1), roughness: 0.96 }),
   castle: new THREE.MeshStandardMaterial({ map: atlasTile(2, 1), roughness: 0.85 }),
-  path: new THREE.MeshStandardMaterial({ map: atlasTile(3, 1), roughness: 0.98 }),
-  moss: new THREE.MeshStandardMaterial({ map: atlasTile(0, 2), roughness: 0.95 }),
-  farm: new THREE.MeshStandardMaterial({ map: atlasTile(1, 2), roughness: 0.98 }),
+  path: new THREE.MeshStandardMaterial({ map: atlasSlice(3, 1, FLAT_GROUND_SLICE), roughness: 0.98 }),
+  moss: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 2, FLAT_GROUND_SLICE), roughness: 0.95 }),
+  farm: new THREE.MeshStandardMaterial({ map: atlasSlice(1, 2, FLAT_GROUND_SLICE), roughness: 0.98 }),
   water: new THREE.MeshStandardMaterial({
-    map: atlasTile(2, 2),
+    map: atlasSlice(2, 2, FLAT_GROUND_SLICE),
     roughness: 0.36,
     metalness: 0,
     transparent: true,
@@ -171,7 +192,7 @@ const materials = {
   cliff: new THREE.MeshStandardMaterial({ map: atlasTile(3, 2), roughness: 0.94 }),
   trim: new THREE.MeshStandardMaterial({ map: atlasTile(0, 3), roughness: 0.75 }),
   roof: new THREE.MeshStandardMaterial({ map: atlasTile(1, 3), roughness: 0.86 }),
-  mud: new THREE.MeshStandardMaterial({ map: atlasTile(2, 3), roughness: 0.98 }),
+  mud: new THREE.MeshStandardMaterial({ map: atlasSlice(2, 3, FLAT_GROUND_SLICE), roughness: 0.98 }),
   banner: new THREE.MeshStandardMaterial({ map: atlasTile(3, 3), roughness: 0.7 }),
   spawnGood: new THREE.MeshBasicMaterial({
     color: 0x8eed71,
@@ -273,10 +294,10 @@ function pathScore(x, z) {
 }
 
 function createTerrain() {
-  const grassSet = materialSet(materials.grassTop, materials.dirt);
-  const pathSet = materialSet(materials.path, materials.dirt);
-  const farmSet = materialSet(materials.farm, materials.dirt);
-  const mudSet = materialSet(materials.mud, materials.dirt);
+  const grassSet = materialSet(materials.grassTop, materials.grassSide, materials.grassSide);
+  const pathSet = materialSet(materials.path, materials.grassSide, materials.grassSide);
+  const farmSet = materialSet(materials.farm, materials.grassSide, materials.grassSide);
+  const mudSet = materialSet(materials.mud, materials.grassSide, materials.grassSide);
   const waterSet = materialSet(materials.water, materials.cliff);
 
   for (let x = -HALF_MAP; x < HALF_MAP; x += 1) {
@@ -918,12 +939,14 @@ function updateCardDrag(event) {
   dragState.ghost.style.left = `${event.clientX - 38}px`;
   dragState.ghost.style.top = `${event.clientY - 48}px`;
   const point = pointerToGround(event.clientX, event.clientY);
-  dragState.point = point;
-  dragState.valid = !!point && canSpawnAt(point) && game.rage >= dragState.card.cost;
+  const spawnPoint = spawnPointForDrop(point);
+  dragState.point = spawnPoint;
+  dragState.valid = !!spawnPoint && game.rage >= dragState.card.cost;
   spawnPreview.visible = !!point;
   if (point) {
-    spawnPreview.position.x = point.x;
-    spawnPreview.position.z = point.z;
+    const previewPoint = spawnPoint ?? point;
+    spawnPreview.position.x = previewPoint.x;
+    spawnPreview.position.z = previewPoint.z;
     spawnPreview.material = dragState.valid ? materials.spawnGood : materials.spawnBad;
   }
 }
@@ -939,19 +962,53 @@ function endCardDrag() {
 }
 
 function canSpawnAt(point) {
-  if (Math.abs(point.x) > HALF_MAP || Math.abs(point.z) > HALF_MAP) return false;
-  return Math.abs(point.x) > HALF_MAP - SPAWN_BAND || Math.abs(point.z) > HALF_MAP - SPAWN_BAND;
+  return !!spawnPointForDrop(point);
+}
+
+function spawnSides(point) {
+  const innerLimit = HALF_MAP - SPAWN_BAND;
+  const sides = [];
+  if (point.z <= -innerLimit) sides.push("north");
+  if (point.z >= innerLimit) sides.push("south");
+  if (point.x <= -innerLimit) sides.push("west");
+  if (point.x >= innerLimit) sides.push("east");
+  return sides;
+}
+
+function spawnPointForDrop(point) {
+  if (!point) return null;
+  const outerLimit = HALF_MAP + SPAWN_DROP_TOLERANCE;
+  if (Math.abs(point.x) > outerLimit || Math.abs(point.z) > outerLimit) return null;
+
+  const clamped = new THREE.Vector3(
+    clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
+    0,
+    clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
+  );
+  return spawnSides(clamped).length > 0 ? clamped : null;
+}
+
+function clampToSpawnBand(point, sides) {
+  const innerLimit = HALF_MAP - SPAWN_BAND;
+  point.x = clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING);
+  point.z = clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING);
+
+  if (sides.includes("west")) point.x = clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, -innerLimit);
+  if (sides.includes("east")) point.x = clamp(point.x, innerLimit, HALF_MAP - SPAWN_EDGE_PADDING);
+  if (sides.includes("north")) point.z = clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, -innerLimit);
+  if (sides.includes("south")) point.z = clamp(point.z, innerLimit, HALF_MAP - SPAWN_EDGE_PADDING);
+  return point;
 }
 
 function spawnSwarm(card, point) {
+  const sides = spawnSides(point);
   game.rage = clamp(game.rage - card.cost, 0, game.maxRage);
   for (let i = 0; i < card.count; i += 1) {
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.sqrt(Math.random()) * card.spread;
-    const pos = new THREE.Vector3(
-      clamp(point.x + Math.cos(angle) * radius, -HALF_MAP + 0.8, HALF_MAP - 0.8),
-      0,
-      clamp(point.z + Math.sin(angle) * radius, -HALF_MAP + 0.8, HALF_MAP - 0.8),
+    const pos = clampToSpawnBand(
+      new THREE.Vector3(point.x + Math.cos(angle) * radius, 0, point.z + Math.sin(angle) * radius),
+      sides,
     );
     spawnUnit(card.unitType, pos);
   }
