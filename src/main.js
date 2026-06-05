@@ -1,6 +1,6 @@
 import "./styles.css";
 import * as THREE from "three";
-import { createIcons, Home, Pause, Play, RotateCcw, RotateCw } from "lucide";
+import { createIcons, Home, Pause, Play, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide";
 
 createIcons({
   icons: {
@@ -9,6 +9,8 @@ createIcons({
     Play,
     RotateCcw,
     RotateCw,
+    ZoomIn,
+    ZoomOut,
   },
 });
 
@@ -26,21 +28,23 @@ const spoilsReadout = document.querySelector("#spoilsReadout");
 const battleMessage = document.querySelector("#battleMessage");
 const pauseToggle = document.querySelector("#pauseToggle");
 
-const MAP_SIZE = 36;
+const MAP_SIZE = 64;
 const HALF_MAP = MAP_SIZE / 2;
-const TERRAIN_BASE_Y = -0.78;
-const TILE_SCALE = 1.012;
+const TERRAIN_BASE_Y = -1.35;
 const SPAWN_BAND = 5;
 const SPAWN_DROP_TOLERANCE = 1.5;
 const SPAWN_EDGE_PADDING = 0.72;
-const MIN_CAMERA_PITCH = 0.18;
-const MAX_CAMERA_PITCH = 1.48;
+const MIN_CAMERA_PITCH = 0.28;
+const MAX_CAMERA_PITCH = 1.4;
+const MAP_SEED = Math.random() * 10000;
+const LAKE_CENTER_X = -HALF_MAP + 13 + Math.sin(MAP_SEED * 0.23) * 4;
+const LAKE_CENTER_Z = HALF_MAP - 16 + Math.cos(MAP_SEED * 0.19) * 5;
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10181b);
-scene.fog = new THREE.FogExp2(0x10181b, 0.016);
+scene.fog = new THREE.FogExp2(0x10181b, 0.004);
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -52,13 +56,12 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 160);
+const camera = new THREE.PerspectiveCamera(24, window.innerWidth / window.innerHeight, 0.1, 360);
 const cameraState = {
   target: new THREE.Vector3(0, 0, -2),
   yaw: 0,
-  pitch: 1.05,
-  zoom: 22,
-  distance: 30,
+  pitch: 0.92,
+  distance: 146,
 };
 
 const raycaster = new THREE.Raycaster();
@@ -68,7 +71,6 @@ const tmpPoint = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 const clock = new THREE.Clock();
 
-const loader = new THREE.TextureLoader();
 const textureCache = new Map();
 
 const game = {
@@ -105,6 +107,8 @@ const cards = [
     cost: 3,
     count: 8,
     spread: 1.45,
+    level: 1,
+    upgradeBaseCost: 4,
   },
   {
     id: "brutes",
@@ -114,6 +118,8 @@ const cards = [
     cost: 5,
     count: 3,
     spread: 1.15,
+    level: 1,
+    upgradeBaseCost: 6,
   },
   {
     id: "torches",
@@ -123,57 +129,10 @@ const cards = [
     cost: 4,
     count: 5,
     spread: 1.35,
+    level: 1,
+    upgradeBaseCost: 5,
   },
 ];
-
-async function loadTextureAsset(path, key = path) {
-  if (textureCache.has(key)) return textureCache.get(key);
-  const texture = await loader.loadAsync(path);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  textureCache.set(key, texture);
-  return texture;
-}
-
-const blockAtlas = await loadTextureAsset("/assets/block-atlas.png", "block-atlas");
-const characterSheet = await loadTextureAsset("/assets/character-sheet.png", "character-sheet");
-
-function atlasTile(col, row, cols = 4, rows = 4, source = blockAtlas, cachePrefix = "tile") {
-  const key = `${cachePrefix}-${col}-${row}-${cols}-${rows}`;
-  if (textureCache.has(key)) return textureCache.get(key);
-  const texture = source.clone();
-  texture.repeat.set(1 / cols, 1 / rows);
-  texture.offset.set(col / cols, 1 - (row + 1) / rows);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  textureCache.set(key, texture);
-  return texture;
-}
-
-function atlasSlice(col, row, slice, cols = 4, rows = 4, source = blockAtlas, cachePrefix = "slice") {
-  const key = `${cachePrefix}-${col}-${row}-${slice.x}-${slice.y}-${slice.width}-${slice.height}-${cols}-${rows}`;
-  if (textureCache.has(key)) return textureCache.get(key);
-  const texture = source.clone();
-  texture.repeat.set(slice.width / cols, slice.height / rows);
-  texture.offset.set((col + slice.x) / cols, 1 - (row + slice.y + slice.height) / rows);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  textureCache.set(key, texture);
-  return texture;
-}
-
-const ISO_TOP_SLICE = { x: 0.04, y: 0.02, width: 0.92, height: 0.58 };
-const ISO_SIDE_SLICE = { x: 0.04, y: 0.57, width: 0.92, height: 0.41 };
-const FLAT_GROUND_SLICE = { x: 0.04, y: 0.04, width: 0.92, height: 0.92 };
-const ATLAS_CLEAN_SLICE = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
 function hexToRgb(hex) {
   const value = Number.parseInt(hex.replace("#", ""), 16);
@@ -265,13 +224,6 @@ function terrainMaterial(kind, base, flecks, options = {}) {
   });
 }
 
-function atlasMaterial(col, row, roughness = 0.9) {
-  return new THREE.MeshStandardMaterial({
-    map: atlasSlice(col, row, ATLAS_CLEAN_SLICE, 4, 4, blockAtlas, "building"),
-    roughness,
-  });
-}
-
 const materials = {
   grassTop: terrainMaterial("grassTop", "#4f9d3d", ["#73bd48", "#326f32", "#d8d566"]),
   grassSide: terrainMaterial("grassSide", "#8a5b2d", ["#6e4424", "#a3703d", "#5f8d38"]),
@@ -280,20 +232,23 @@ const materials = {
     roughness: 0.42,
   }),
   rockSide: terrainMaterial("rockSide", "#64645f", ["#8b8b83", "#444642", "#737b68"]),
-  dirt: atlasMaterial(1, 0, 0.98),
-  stone: atlasMaterial(2, 0, 0.9),
-  cobble: atlasMaterial(3, 0, 0.92),
-  wood: atlasMaterial(0, 1, 0.86),
-  thatch: atlasMaterial(1, 1, 0.96),
-  castle: atlasMaterial(2, 1, 0.85),
+  dirt: terrainMaterial("dirtBlock", "#7b4d28", ["#9a6738", "#503018", "#a06e3e"]),
+  stone: terrainMaterial("stoneBrick", "#777872", ["#a0a099", "#4b4c49", "#686b63"], { roughness: 0.9 }),
+  cobble: terrainMaterial("cobble", "#6f706a", ["#97978e", "#424541", "#575b53"], { roughness: 0.94 }),
+  wood: terrainMaterial("woodPlank", "#865326", ["#b17435", "#4d2d15", "#c28a4b"], { roughness: 0.88 }),
+  thatch: terrainMaterial("thatch", "#c5a134", ["#f0d36a", "#7b5b1b", "#a57d24"]),
+  castle: terrainMaterial("castleStone", "#777a78", ["#a6aaa6", "#434747", "#656b68"], { roughness: 0.88 }),
   path: terrainMaterial("path", "#a88952", ["#d2b477", "#72583a", "#b9a063"]),
   moss: terrainMaterial("moss", "#768252", ["#95a56a", "#4d5f36", "#8a9160"]),
   farm: terrainMaterial("farm", "#63411f", ["#8a5c2d", "#4d3119", "#83ba4a"]),
   cliff: terrainMaterial("cliff", "#64645f", ["#85857d", "#41433f", "#767966"]),
-  trim: atlasMaterial(0, 3, 0.75),
-  roof: atlasMaterial(1, 3, 0.86),
+  trim: terrainMaterial("trim", "#b58532", ["#edc15a", "#6d4617", "#d49a37"], { roughness: 0.78 }),
+  roof: new THREE.MeshStandardMaterial({ color: 0xa73b2e, roughness: 0.84, flatShading: true }),
+  roofSide: new THREE.MeshStandardMaterial({ color: 0x67251e, roughness: 0.9, flatShading: true }),
+  thatchRoof: new THREE.MeshStandardMaterial({ color: 0xcaa746, roughness: 0.95, flatShading: true }),
+  thatchRoofSide: new THREE.MeshStandardMaterial({ color: 0x7b5a20, roughness: 0.98, flatShading: true }),
   mud: terrainMaterial("mud", "#60401f", ["#7a532c", "#382715", "#8a673b"]),
-  banner: atlasMaterial(3, 3, 0.7),
+  banner: terrainMaterial("banner", "#9a2d27", ["#d85a43", "#5d1717", "#e4bb58"], { roughness: 0.72 }),
   spawnGood: new THREE.MeshBasicMaterial({
     color: 0x8eed71,
     transparent: true,
@@ -381,29 +336,29 @@ function createLighting() {
   sun.position.set(-12, 24, 16);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -28;
-  sun.shadow.camera.right = 28;
-  sun.shadow.camera.top = 28;
-  sun.shadow.camera.bottom = -28;
+  sun.shadow.camera.left = -HALF_MAP - 8;
+  sun.shadow.camera.right = HALF_MAP + 8;
+  sun.shadow.camera.top = HALF_MAP + 8;
+  sun.shadow.camera.bottom = -HALF_MAP - 8;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 70;
   scene.add(sun);
 }
 
 function pathScore(x, z) {
-  const main = Math.abs(x) < 1.35 && z > -15 && z < 17;
-  const cross = Math.abs(z + 5) < 1.1 && Math.abs(x) < 11;
+  const main = Math.abs(x) < 1.55 && z > -12 && z < HALF_MAP - 5;
+  const cross = Math.abs(z + 5) < 1.2 && Math.abs(x) < 12;
   const gate = Math.abs(x) < 4 && z < -5 && z > -13;
   return main || cross || gate;
 }
 
 function isVillagePlateau(x, z) {
-  return Math.abs(x) < 10.8 && z > -11.2 && z < 7.5;
+  return Math.abs(x) < 11.5 && z > -12.2 && z < 8.5;
 }
 
 function waterScore(x, z) {
-  const lake = ((x + 13.6) / 4.5) ** 2 + ((z - 9.2) / 5.5) ** 2;
-  const inlet = ((x + 16.2) / 2.5) ** 2 + ((z - 3.2) / 3.2) ** 2;
+  const lake = ((x - LAKE_CENTER_X) / 6.5) ** 2 + ((z - LAKE_CENTER_Z) / 8.5) ** 2;
+  const inlet = ((x + HALF_MAP - 4.5) / 3.6) ** 2 + ((z - (LAKE_CENTER_Z - 7)) / 5.5) ** 2;
   return Math.min(lake, inlet);
 }
 
@@ -431,46 +386,89 @@ function terrainTopHeight(x, z) {
   if (isShoreTile(x, z)) return -0.06;
   if (pathScore(x, z) || isVillagePlateau(x, z)) return 0;
 
-  const edgeRise = Math.max(Math.abs(x), Math.abs(z)) > 15 ? 0.72 : Math.max(Math.abs(x), Math.abs(z)) > 12.5 ? 0.36 : 0;
-  const westernRidge = x < -9 && z < -5 ? 0.36 : 0;
-  const southeastHill = x > 9 && z > 7 ? 0.72 : x > 8 && z > 4 ? 0.36 : 0;
-  const northStep = z < -13 && Math.abs(x) > 7 ? 0.36 : 0;
-  const roughness = Math.sin(x * 1.7 + z * 0.6) + Math.sin(z * 1.25 - x * 0.8);
-  const blockNoise = roughness > 1.25 ? 0.36 : roughness < -1.15 ? -0.18 : 0;
-  return clamp(edgeRise + westernRidge + southeastHill + northStep + blockNoise, -0.06, 1.08);
+  const edge = Math.max(Math.abs(x), Math.abs(z)) / HALF_MAP;
+  const rolling =
+    Math.sin((x + MAP_SEED) * 0.24) * 0.34 +
+    Math.cos((z - MAP_SEED) * 0.2) * 0.32 +
+    Math.sin((x * 0.13 + z * 0.18 + MAP_SEED) * 1.7) * 0.26;
+  const ridge =
+    Math.exp(-((x + 19 + Math.sin(MAP_SEED) * 3) ** 2) / 120 - ((z + 7) ** 2) / 420) * 1.25 +
+    Math.exp(-((x - 18) ** 2) / 190 - ((z - 16 + Math.cos(MAP_SEED) * 4) ** 2) / 170) * 1.05;
+  const edgeRise = edge > 0.74 ? (edge - 0.74) * 3.4 : 0;
+  return clamp(rolling + ridge + edgeRise, -0.12, 1.85);
+}
+
+function terrainTileMaterial(x, z) {
+  if (isWaterTile(x, z)) return materials.water;
+  if (isShoreTile(x, z)) return materials.sand;
+  if (pathScore(x, z)) return materials.path;
+  if (x > 7 && x < 12 && z > -1 && z < 4) return materials.farm;
+  if (x < -14 && z > 9 && z < 17) return materials.mud;
+  return materials.grassTop;
+}
+
+function makeTerrainTileGeometry(x, z) {
+  const h00 = terrainTopHeight(x, z);
+  const h10 = terrainTopHeight(x + 1, z);
+  const h01 = terrainTopHeight(x, z + 1);
+  const h11 = terrainTopHeight(x + 1, z + 1);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute([x, h00, z, x + 1, h10, z, x, h01, z + 1, x + 1, h11, z + 1], 3),
+  );
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+  geometry.setIndex([0, 2, 1, 1, 2, 3]);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addTerrainSkirt(x0, z0, x1, z1, h0, h1) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute([x0, TERRAIN_BASE_Y, z0, x1, TERRAIN_BASE_Y, z1, x0, h0, z0, x1, h1, z1], 3),
+  );
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+  geometry.setIndex([0, 1, 2, 1, 3, 2]);
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, materials.rockSide);
+  mesh.receiveShadow = true;
+  terrainGroup.add(mesh);
+}
+
+function sampleTerrainHeight(x, z) {
+  const clampedX = clamp(x, -HALF_MAP + 0.001, HALF_MAP - 0.001);
+  const clampedZ = clamp(z, -HALF_MAP + 0.001, HALF_MAP - 0.001);
+  const x0 = Math.floor(clampedX);
+  const z0 = Math.floor(clampedZ);
+  const tx = clampedX - x0;
+  const tz = clampedZ - z0;
+  const h00 = terrainTopHeight(x0, z0);
+  const h10 = terrainTopHeight(x0 + 1, z0);
+  const h01 = terrainTopHeight(x0, z0 + 1);
+  const h11 = terrainTopHeight(x0 + 1, z0 + 1);
+  const hx0 = h00 + (h10 - h00) * tx;
+  const hx1 = h01 + (h11 - h01) * tx;
+  return hx0 + (hx1 - hx0) * tz;
 }
 
 function createTerrain() {
-  const grassSet = materialSet(materials.grassTop, materials.grassSide, materials.grassSide);
-  const pathSet = materialSet(materials.path, materials.grassSide, materials.grassSide);
-  const farmSet = materialSet(materials.farm, materials.grassSide, materials.grassSide);
-  const mudSet = materialSet(materials.mud, materials.grassSide, materials.grassSide);
-  const waterSet = materialSet(materials.water, materials.rockSide, materials.rockSide);
-  const sandSet = materialSet(materials.sand, materials.grassSide, materials.grassSide);
-
   for (let x = -HALF_MAP; x < HALF_MAP; x += 1) {
     for (let z = -HALF_MAP; z < HALF_MAP; z += 1) {
       const cx = x + 0.5;
       const cz = z + 0.5;
-      const topHeight = terrainTopHeight(cx, cz);
-      const blockHeight = Math.max(0.14, topHeight - TERRAIN_BASE_Y);
-      let mats = grassSet;
-      const water = isWaterTile(cx, cz);
-      const shore = isShoreTile(cx, cz);
-      if (water) mats = waterSet;
-      else if (shore) mats = sandSet;
-      else if (pathScore(cx, cz)) mats = pathSet;
-      else if (x > 7 && x < 12 && z > -1 && z < 4) mats = farmSet;
-      else if (x < -11 && z > 9 && z < 15) mats = mudSet;
-      addBlock(cx, TERRAIN_BASE_Y, cz, TILE_SCALE, blockHeight, TILE_SCALE, mats);
+      const mesh = new THREE.Mesh(makeTerrainTileGeometry(x, z), terrainTileMaterial(cx, cz));
+      mesh.receiveShadow = true;
+      terrainGroup.add(mesh);
     }
   }
 
-  for (let i = -15; i <= 15; i += 1) {
-    addRamp(i + 0.5, -0.2, -17.55, 1, 0.8, 1, "north", materials.cliff);
-    addRamp(i + 0.5, -0.2, 17.55, 1, 0.8, 1, "south", materials.cliff);
-    addRamp(-17.55, -0.2, i + 0.5, 1, 0.8, 1, "west", materials.cliff);
-    addRamp(17.55, -0.2, i + 0.5, 1, 0.8, 1, "east", materials.cliff);
+  for (let i = -HALF_MAP; i < HALF_MAP; i += 1) {
+    addTerrainSkirt(i, -HALF_MAP, i + 1, -HALF_MAP, terrainTopHeight(i, -HALF_MAP), terrainTopHeight(i + 1, -HALF_MAP));
+    addTerrainSkirt(i + 1, HALF_MAP, i, HALF_MAP, terrainTopHeight(i + 1, HALF_MAP), terrainTopHeight(i, HALF_MAP));
+    addTerrainSkirt(-HALF_MAP, i + 1, -HALF_MAP, i, terrainTopHeight(-HALF_MAP, i + 1), terrainTopHeight(-HALF_MAP, i));
+    addTerrainSkirt(HALF_MAP, i, HALF_MAP, i + 1, terrainTopHeight(HALF_MAP, i), terrainTopHeight(HALF_MAP, i + 1));
   }
 
   const spawnMat = new THREE.MeshBasicMaterial({
@@ -483,13 +481,13 @@ function createTerrain() {
   const stripGeo = new THREE.PlaneGeometry(MAP_SIZE, SPAWN_BAND);
   stripGeo.rotateX(-Math.PI / 2);
   const north = new THREE.Mesh(stripGeo, spawnMat);
-  north.position.set(0, 0.12, -HALF_MAP + SPAWN_BAND / 2);
+  north.position.set(0, 1.05, -HALF_MAP + SPAWN_BAND / 2);
   const south = north.clone();
   south.position.z = HALF_MAP - SPAWN_BAND / 2;
   const sideGeo = new THREE.PlaneGeometry(SPAWN_BAND, MAP_SIZE);
   sideGeo.rotateX(-Math.PI / 2);
   const west = new THREE.Mesh(sideGeo, spawnMat);
-  west.position.set(-HALF_MAP + SPAWN_BAND / 2, 0.13, 0);
+  west.position.set(-HALF_MAP + SPAWN_BAND / 2, 1.06, 0);
   const east = west.clone();
   east.position.x = HALF_MAP - SPAWN_BAND / 2;
   terrainGroup.add(north, south, west, east);
@@ -578,12 +576,39 @@ function createBase() {
   baseStructure = entity;
 }
 
-function addSteppedRoof(parent, roofMat) {
-  const roofMats = materialSet(roofMat, roofMat, roofMat);
-  addBlock(0, 1.2, 0, 3.34, 0.28, 2.86, roofMats, parent);
-  addBlock(0, 1.48, 0, 2.42, 0.32, 2.86, roofMats, parent);
-  addBlock(0, 1.8, 0, 1.42, 0.34, 2.86, roofMats, parent);
-  addBlock(0, 2.14, 0, 0.42, 0.34, 2.86, roofMats, parent);
+function addGableRoof(parent, slopeMaterial, sideMaterial) {
+  const width = 3.42;
+  const depth = 2.9;
+  const height = 1.12;
+  const y = 1.2;
+  const vertices = [
+    -width / 2, y, -depth / 2,
+    width / 2, y, -depth / 2,
+    -width / 2, y, depth / 2,
+    width / 2, y, depth / 2,
+    0, y + height, -depth / 2,
+    0, y + height, depth / 2,
+  ];
+  const indices = [
+    0, 2, 5, 0, 5, 4,
+    1, 4, 5, 1, 5, 3,
+    0, 4, 1,
+    2, 3, 5,
+    0, 1, 2, 1, 3, 2,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.clearGroups();
+  geometry.addGroup(0, 12, 0);
+  geometry.addGroup(12, 6, 1);
+  geometry.addGroup(18, 6, 0);
+  geometry.computeVertexNormals();
+  const roof = new THREE.Mesh(geometry, [slopeMaterial, sideMaterial]);
+  roof.castShadow = true;
+  roof.receiveShadow = true;
+  parent.add(roof);
+  return roof;
 }
 
 function createHouse(x, z, roof = "thatch") {
@@ -592,8 +617,9 @@ function createHouse(x, z, roof = "thatch") {
   addBlock(0, 0, 0, 2.8, 1.35, 2.4, materialSet(materials.wood), house);
   addBlock(-0.82, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   addBlock(0.8, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
-  const roofMat = roof === "red" ? materials.roof : materials.thatch;
-  addSteppedRoof(house, roofMat);
+  const roofMat = roof === "red" ? materials.roof : materials.thatchRoof;
+  const roofSideMat = roof === "red" ? materials.roofSide : materials.thatchRoofSide;
+  addGableRoof(house, roofMat, roofSideMat);
   return registerStructure(house, {
     type: "house",
     hp: 360,
@@ -651,12 +677,82 @@ function createVillage() {
   }
 }
 
+function drawPx(ctx, x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h);
+}
+
+function createUnitTexture(type, frame = 0) {
+  const size = 18;
+  const canvasTexture = document.createElement("canvas");
+  canvasTexture.width = size;
+  canvasTexture.height = size;
+  const ctx = canvasTexture.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  const bob = frame % 2;
+  const step = frame % 4 < 2 ? -1 : 1;
+
+  if (type === "raider" || type === "torch") {
+    drawPx(ctx, 4, 4 + bob, 10, 9, "#101010");
+    drawPx(ctx, 5, 3 + bob, 8, 6, "#62a33e");
+    drawPx(ctx, 3, 5 + bob, 2, 2, "#62a33e");
+    drawPx(ctx, 13, 5 + bob, 2, 2, "#62a33e");
+    drawPx(ctx, 6, 6 + bob, 2, 1, "#f0cf52");
+    drawPx(ctx, 10, 6 + bob, 2, 1, "#f0cf52");
+    drawPx(ctx, 6, 9 + bob, 6, 4, "#6f4320");
+    drawPx(ctx, 5 + step, 13, 3, 3, "#2d271e");
+    drawPx(ctx, 10 - step, 13, 3, 3, "#2d271e");
+    if (type === "torch") {
+      drawPx(ctx, 13, 8 + bob, 2, 6, "#6d3f1b");
+      drawPx(ctx, 13, 5 + bob, 3, 3, "#ff9b27");
+      drawPx(ctx, 14, 4 + bob, 1, 1, "#ffe169");
+    } else {
+      drawPx(ctx, 13, 9 + bob, 4, 1, "#d7d7d2");
+      drawPx(ctx, 15, 8 + bob, 1, 1, "#f4f4ef");
+    }
+  } else if (type === "brute") {
+    drawPx(ctx, 3, 3 + bob, 12, 11, "#101010");
+    drawPx(ctx, 5, 3 + bob, 8, 6, "#74a944");
+    drawPx(ctx, 4, 8 + bob, 10, 6, "#7b4a24");
+    drawPx(ctx, 6, 6 + bob, 2, 1, "#ffe169");
+    drawPx(ctx, 10, 6 + bob, 2, 1, "#ffe169");
+    drawPx(ctx, 14, 4 + bob, 2, 10, "#5b351b");
+    drawPx(ctx, 13, 3 + bob, 4, 3, "#8a552a");
+    drawPx(ctx, 5 + step, 14, 3, 3, "#2d271e");
+    drawPx(ctx, 10 - step, 14, 3, 3, "#2d271e");
+  } else if (type === "knight") {
+    drawPx(ctx, 4, 3 + bob, 10, 12, "#101010");
+    drawPx(ctx, 5, 3 + bob, 8, 5, "#b9bab2");
+    drawPx(ctx, 6, 4 + bob, 6, 2, "#4a4c4d");
+    drawPx(ctx, 5, 8 + bob, 8, 5, "#315a9d");
+    drawPx(ctx, 12, 8 + bob, 3, 5, "#a8aaa5");
+    drawPx(ctx, 3, 9 + bob, 3, 1, "#d5d5cf");
+    drawPx(ctx, 5 + step, 14, 3, 3, "#343434");
+    drawPx(ctx, 10 - step, 14, 3, 3, "#343434");
+  } else {
+    drawPx(ctx, 5, 4 + bob, 8, 11, "#17110d");
+    drawPx(ctx, 6, 3 + bob, 6, 5, "#c58b55");
+    drawPx(ctx, 5, 8 + bob, 8, 5, "#d8caa2");
+    drawPx(ctx, 7, 6 + bob, 1, 1, "#1a1310");
+    drawPx(ctx, 10, 6 + bob, 1, 1, "#1a1310");
+    drawPx(ctx, 5 + step, 14, 3, 3, "#4f3d28");
+    drawPx(ctx, 10 - step, 14, 3, 3, "#4f3d28");
+  }
+
+  const texture = new THREE.CanvasTexture(canvasTexture);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  return texture;
+}
+
 const spriteFrameSets = {
-  raider: [0, 1, 4, 5, 6].map((col) => atlasTile(col, 0, 7, 4, characterSheet, "sprite")),
-  brute: [0, 1, 2, 4, 5, 6].map((col) => atlasTile(col, 1, 7, 4, characterSheet, "sprite")),
-  torch: [0, 1, 5, 6].map((col) => atlasTile(col, 0, 7, 4, characterSheet, "sprite")),
-  knight: [0, 1, 4, 5, 6].map((col) => atlasTile(col, 2, 7, 4, characterSheet, "sprite")),
-  villager: [0, 1, 4, 5, 6].map((col) => atlasTile(col, 3, 7, 4, characterSheet, "sprite")),
+  raider: [0, 1, 2, 3].map((frame) => createUnitTexture("raider", frame)),
+  brute: [0, 1, 2, 3].map((frame) => createUnitTexture("brute", frame)),
+  torch: [0, 1, 2, 3].map((frame) => createUnitTexture("torch", frame)),
+  knight: [0, 1, 2, 3].map((frame) => createUnitTexture("knight", frame)),
+  villager: [0, 1, 2, 3].map((frame) => createUnitTexture("villager", frame)),
 };
 
 const spriteMaterials = Object.fromEntries(
@@ -727,25 +823,37 @@ const unitStats = {
   },
 };
 
-function spawnUnit(type, position, burst = true) {
+function unitLevelScale(level) {
+  return 1 + (level - 1) * 0.22;
+}
+
+function syncUnitToTerrain(unit) {
+  const groundY = sampleTerrainHeight(unit.position.x, unit.position.z);
+  unit.groundY = groundY;
+  unit.position.y = groundY + unit.sprite.scale.y * 0.54;
+  unit.shadow.position.set(unit.position.x, groundY + 0.025, unit.position.z);
+}
+
+function spawnUnit(type, position, burst = true, level = 1) {
   const stats = unitStats[type];
+  const levelScale = stats.team === "goblin" ? unitLevelScale(level) : 1;
   const sprite = new THREE.Sprite(spriteMaterials[type][0]);
-  sprite.position.set(position.x, 1.08, position.z);
-  sprite.scale.set(stats.scale[0], stats.scale[1], 1);
+  sprite.position.set(position.x, 0, position.z);
+  sprite.scale.set(stats.scale[0] * (1 + (level - 1) * 0.035), stats.scale[1] * (1 + (level - 1) * 0.035), 1);
   sprite.castShadow = true;
 
   const shadow = new THREE.Mesh(circleGeometry, materials.shadow);
-  shadow.position.set(position.x, 0.08, position.z);
   shadow.scale.set(stats.scale[0] * 0.45, stats.scale[0] * 0.24, 1);
 
   const unit = {
     id: crypto.randomUUID(),
     type,
     team: stats.team,
-    hp: stats.hp,
-    maxHp: stats.hp,
-    speed: stats.speed,
-    damage: stats.damage,
+    level,
+    hp: Math.round(stats.hp * levelScale),
+    maxHp: Math.round(stats.hp * levelScale),
+    speed: stats.speed * (stats.team === "goblin" ? 1 + (level - 1) * 0.035 : 1),
+    damage: Math.round(stats.damage * levelScale),
     range: stats.range,
     cooldown: stats.cooldown,
     attackTimer: rand(0, stats.cooldown),
@@ -759,6 +867,7 @@ function spawnUnit(type, position, burst = true) {
     frameSeed: Math.random() * 10,
   };
 
+  syncUnitToTerrain(unit);
   units.push(unit);
   unitGroup.add(shadow, sprite);
   if (burst) createSpawnBurst(position, type === "brute" ? 0xb95632 : 0x9ec96d);
@@ -766,12 +875,13 @@ function spawnUnit(type, position, burst = true) {
 }
 
 function createSpawnBurst(position, color) {
+  const groundY = sampleTerrainHeight(position.x, position.z);
   for (let i = 0; i < 9; i += 1) {
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 0.12, 0.12),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
     );
-    mesh.position.set(position.x + rand(-0.4, 0.4), 0.45 + rand(0, 0.55), position.z + rand(-0.4, 0.4));
+    mesh.position.set(position.x + rand(-0.4, 0.4), groundY + 0.45 + rand(0, 0.55), position.z + rand(-0.4, 0.4));
     const particle = {
       mesh,
       life: rand(0.4, 0.75),
@@ -924,11 +1034,12 @@ function updateVillager(unit, dt) {
 }
 
 function createHitParticle(position, color) {
+  const groundY = sampleTerrainHeight(position.x, position.z);
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.14, 6, 4),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }),
   );
-  mesh.position.set(position.x, 1.1, position.z);
+  mesh.position.set(position.x, Math.max(position.y, groundY + 0.65), position.z);
   particles.push({
     mesh,
     life: 0.28,
@@ -1017,8 +1128,7 @@ function updateUnitAnimation(unit) {
     ? Math.floor((game.time * 8 + unit.frameSeed) % frames.length)
     : Math.floor((game.time * 2 + unit.frameSeed) % Math.min(2, frames.length));
   unit.sprite.material = frames[frame];
-  unit.shadow.position.x = unit.position.x;
-  unit.shadow.position.z = unit.position.z;
+  syncUnitToTerrain(unit);
 }
 
 function updateUnits(dt) {
@@ -1049,18 +1159,87 @@ function updateDefenderSpawns(dt) {
   }
 }
 
+function cardCount(card) {
+  return card.count + Math.floor((card.level - 1) * (card.id === "brutes" ? 0.7 : 1.35));
+}
+
+function cardUpgradeCost(card) {
+  return card.level >= 7 ? null : card.upgradeBaseCost + card.level * 3;
+}
+
+function createCardArtDataUrl(card) {
+  const canvasArt = document.createElement("canvas");
+  canvasArt.width = 64;
+  canvasArt.height = 48;
+  const ctx = canvasArt.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = card.id === "brutes" ? "#463421" : card.id === "torches" ? "#27324a" : "#263a33";
+  ctx.fillRect(0, 0, 64, 48);
+  ctx.fillStyle = "#1a211f";
+  ctx.fillRect(0, 34, 64, 14);
+  const bodies = card.id === "brutes" ? [[24, 12, 18, 22]] : card.id === "torches" ? [[22, 12, 13, 20], [38, 18, 10, 16]] : [[12, 14, 10, 16], [27, 10, 12, 19], [43, 16, 9, 15]];
+  for (const [x, y, w, h] of bodies) {
+    ctx.fillStyle = "#101010";
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = "#5ea140";
+    ctx.fillRect(x + 2, y, w - 4, Math.max(5, Math.floor(h * 0.34)));
+    ctx.fillStyle = "#7a4826";
+    ctx.fillRect(x + 1, y + Math.floor(h * 0.35), w - 2, Math.floor(h * 0.38));
+    ctx.fillStyle = "#2e2318";
+    ctx.fillRect(x + 2, y + h - 4, 3, 4);
+    ctx.fillRect(x + w - 5, y + h - 4, 3, 4);
+    ctx.fillStyle = "#f3ce54";
+    ctx.fillRect(x + 3, y + 4, 2, 1);
+    ctx.fillRect(x + w - 5, y + 4, 2, 1);
+  }
+  if (card.id === "brutes") {
+    ctx.fillStyle = "#8a562d";
+    ctx.fillRect(42, 7, 7, 25);
+    ctx.fillStyle = "#b88043";
+    ctx.fillRect(40, 5, 11, 7);
+  }
+  if (card.id === "torches") {
+    ctx.fillStyle = "#8b4e22";
+    ctx.fillRect(47, 8, 3, 20);
+    ctx.fillStyle = "#ff9d28";
+    ctx.fillRect(45, 5, 8, 7);
+    ctx.fillStyle = "#ffe36f";
+    ctx.fillRect(48, 4, 3, 3);
+  }
+  return `url("${canvasArt.toDataURL("image/png")}")`;
+}
+
+function upgradeCard(card) {
+  const cost = cardUpgradeCost(card);
+  if (cost === null || game.spoils < cost) return;
+  game.spoils -= cost;
+  card.level += 1;
+  buildDeck();
+  updateHud();
+}
+
 function buildDeck() {
   deckEl.innerHTML = "";
   for (const card of cards) {
-    const button = document.createElement("button");
+    const button = document.createElement("div");
+    const cost = cardUpgradeCost(card);
     button.className = "card";
     button.dataset.card = card.id;
-    button.type = "button";
+    button.role = "button";
+    button.tabIndex = 0;
+    button.style.setProperty("--card-art", createCardArtDataUrl(card));
     button.innerHTML = `
       <span class="cost">${card.cost}</span>
-      <span class="card-title"><span>${card.title}</span><span class="card-count">${card.countLabel}</span></span>
+      <span class="card-level">Lv ${card.level}</span>
+      <span class="card-title"><span>${card.title}</span><span class="card-count">x${cardCount(card)}</span></span>
+      <button class="upgrade-button" type="button" title="Upgrade with spoils">${cost === null ? "MAX" : `+ ${cost}`}</button>
     `;
     button.addEventListener("pointerdown", (event) => beginCardDrag(event, card));
+    button.querySelector(".upgrade-button").addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.querySelector(".upgrade-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      upgradeCard(card);
+    });
     deckEl.append(button);
   }
 }
@@ -1078,6 +1257,7 @@ function beginCardDrag(event, card) {
   const ghost = document.createElement("div");
   ghost.className = "drag-ghost";
   ghost.dataset.card = card.id;
+  ghost.style.setProperty("--card-art", createCardArtDataUrl(card));
   document.body.append(ghost);
   dragState = {
     card,
@@ -1101,6 +1281,7 @@ function updateCardDrag(event) {
     const previewPoint = spawnPoint ?? point;
     spawnPreview.position.x = previewPoint.x;
     spawnPreview.position.z = previewPoint.z;
+    spawnPreview.position.y = sampleTerrainHeight(previewPoint.x, previewPoint.z) + 0.08;
     spawnPreview.material = dragState.valid ? materials.spawnGood : materials.spawnBad;
   }
 }
@@ -1157,14 +1338,15 @@ function clampToSpawnBand(point, sides) {
 function spawnSwarm(card, point) {
   const sides = spawnSides(point);
   game.rage = clamp(game.rage - card.cost, 0, game.maxRage);
-  for (let i = 0; i < card.count; i += 1) {
+  const count = cardCount(card);
+  for (let i = 0; i < count; i += 1) {
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.sqrt(Math.random()) * card.spread;
     const pos = clampToSpawnBand(
       new THREE.Vector3(point.x + Math.cos(angle) * radius, 0, point.z + Math.sin(angle) * radius),
       sides,
     );
-    spawnUnit(card.unitType, pos);
+    spawnUnit(card.unitType, pos, true, card.level);
   }
 }
 
@@ -1208,11 +1390,11 @@ function updateWorldDrag(event) {
   forward.y = 0;
   forward.normalize();
   const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
-  const scale = cameraState.zoom / Math.min(window.innerWidth, window.innerHeight) * 1.72;
+  const scale = cameraState.distance / Math.min(window.innerWidth, window.innerHeight) * 0.58;
   cameraState.target.addScaledVector(right, -dx * scale);
   cameraState.target.addScaledVector(forward, dy * scale);
-  cameraState.target.x = clamp(cameraState.target.x, -11, 11);
-  cameraState.target.z = clamp(cameraState.target.z, -13, 11);
+  cameraState.target.x = clamp(cameraState.target.x, -HALF_MAP + 8, HALF_MAP - 8);
+  cameraState.target.z = clamp(cameraState.target.z, -HALF_MAP + 8, HALF_MAP - 8);
   updateCamera();
 }
 
@@ -1223,10 +1405,7 @@ function endWorldDrag() {
 
 function updateCamera() {
   const aspect = window.innerWidth / window.innerHeight;
-  camera.left = -cameraState.zoom * aspect;
-  camera.right = cameraState.zoom * aspect;
-  camera.top = cameraState.zoom;
-  camera.bottom = -cameraState.zoom;
+  camera.aspect = aspect;
   camera.updateProjectionMatrix();
 
   const dir = new THREE.Vector3(
@@ -1253,11 +1432,16 @@ function pitchCamera(amount) {
   updateCamera();
 }
 
+function zoomCamera(factor) {
+  cameraState.distance = clamp(cameraState.distance * factor, 18, 214);
+  updateCamera();
+}
+
 function resetCamera() {
   cameraState.target.set(0, 0, -2);
   cameraState.yaw = 0;
-  cameraState.pitch = 1.05;
-  cameraState.zoom = 22;
+  cameraState.pitch = 0.92;
+  cameraState.distance = 146;
   updateCamera();
 }
 
@@ -1274,9 +1458,14 @@ function updateHud() {
   structureReadout.textContent = structures.filter((structure) => structure.alive).length;
   spoilsReadout.textContent = game.spoils;
 
-  for (const cardButton of deckEl.querySelectorAll(".card")) {
-    const card = cards.find((item) => item.id === cardButton.dataset.card);
-    cardButton.disabled = game.paused || game.over || game.rage < card.cost;
+  for (const cardEl of deckEl.querySelectorAll(".card")) {
+    const card = cards.find((item) => item.id === cardEl.dataset.card);
+    const cannotDeploy = game.paused || game.over || game.rage < card.cost;
+    cardEl.classList.toggle("disabled", cannotDeploy);
+    cardEl.setAttribute("aria-disabled", String(cannotDeploy));
+    const upgradeButton = cardEl.querySelector(".upgrade-button");
+    const upgradeCost = cardUpgradeCost(card);
+    upgradeButton.disabled = game.over || upgradeCost === null || game.spoils < upgradeCost;
   }
 }
 
@@ -1305,13 +1494,14 @@ function bindInput() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
-    cameraState.zoom = clamp(cameraState.zoom + event.deltaY * 0.015, 13, 33);
-    updateCamera();
+    zoomCamera(Math.exp(event.deltaY * 0.0012));
   }, { passive: false });
 
   document.querySelector("#rotateLeft").addEventListener("click", () => rotateCamera(0.32));
   document.querySelector("#rotateRight").addEventListener("click", () => rotateCamera(-0.32));
   document.querySelector("#resetView").addEventListener("click", resetCamera);
+  document.querySelector("#zoomIn").addEventListener("click", () => zoomCamera(0.82));
+  document.querySelector("#zoomOut").addEventListener("click", () => zoomCamera(1.18));
   pauseToggle.addEventListener("click", togglePause);
 
   window.addEventListener("keydown", (event) => {
@@ -1319,6 +1509,8 @@ function bindInput() {
     if (event.key.toLowerCase() === "e") rotateCamera(-0.16);
     if (event.key.toLowerCase() === "r") pitchCamera(0.1);
     if (event.key.toLowerCase() === "f") pitchCamera(-0.1);
+    if (event.key === "+" || event.key === "=") zoomCamera(0.88);
+    if (event.key === "-" || event.key === "_") zoomCamera(1.14);
     if (event.key === " ") {
       event.preventDefault();
       togglePause();

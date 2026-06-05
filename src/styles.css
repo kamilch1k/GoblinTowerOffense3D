@@ -236,7 +236,7 @@ button {
   touch-action: none;
 }
 
-.card:disabled {
+.card.disabled {
   filter: grayscale(0.55) brightness(0.72);
   cursor: default;
 }
@@ -249,22 +249,11 @@ button {
   position: absolute;
   inset: 0;
   z-index: -2;
-  background-image: url("/assets/card-portraits.png");
+  background-image: var(--card-art);
   background-repeat: no-repeat;
-  background-size: 300% 100%;
+  background-size: cover;
+  image-rendering: pixelated;
   content: "";
-}
-
-.card[data-card="raiders"]::before {
-  background-position: 0% 50%;
-}
-
-.card[data-card="brutes"]::before {
-  background-position: 50% 50%;
-}
-
-.card[data-card="torches"]::before {
-  background-position: 100% 50%;
 }
 
 .card::after {
@@ -314,6 +303,41 @@ button {
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.36);
 }
 
+.card-level {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 246, 215, 0.55);
+  border-radius: 4px;
+  background: rgba(13, 18, 18, 0.72);
+  color: #fff6d7;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.upgrade-button {
+  position: absolute;
+  right: 7px;
+  top: 36px;
+  min-width: 38px;
+  height: 24px;
+  border: 1px solid rgba(255, 246, 215, 0.34);
+  border-radius: 4px;
+  background: #2f4b34;
+  color: #fff6d7;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.upgrade-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .drag-ghost {
   position: fixed;
   z-index: 20;
@@ -330,22 +354,11 @@ button {
 .drag-ghost::before {
   position: absolute;
   inset: 0;
-  background-image: url("/assets/card-portraits.png");
+  background-image: var(--card-art);
   background-repeat: no-repeat;
-  background-size: 300% 100%;
+  background-size: cover;
+  image-rendering: pixelated;
   content: "";
-}
-
-.drag-ghost[data-card="raiders"]::before {
-  background-position: 0% 50%;
-}
-
-.drag-ghost[data-card="brutes"]::before {
-  background-position: 50% 50%;
-}
-
-.drag-ghost[data-card="torches"]::before {
-  background-position: 100% 50%;
 }
 
 @media (max-width: 760px) {
