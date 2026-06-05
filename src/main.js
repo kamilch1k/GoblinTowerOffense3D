@@ -25,13 +25,16 @@ const hordeReadout = document.querySelector("#hordeReadout");
 const defenderReadout = document.querySelector("#defenderReadout");
 const structureReadout = document.querySelector("#structureReadout");
 const spoilsReadout = document.querySelector("#spoilsReadout");
+const territoryReadout = document.querySelector("#territoryReadout");
 const battleMessage = document.querySelector("#battleMessage");
 const pauseToggle = document.querySelector("#pauseToggle");
 
-const MAP_SIZE = 64;
+const MAP_SIZE = 100;
 const HALF_MAP = MAP_SIZE / 2;
 const TERRAIN_BASE_Y = -1.35;
-const SPAWN_BAND = 5;
+const TERRITORY_SIZE = 5;
+const TERRITORY_CHUNKS = MAP_SIZE / TERRITORY_SIZE;
+const STARTING_TERRITORY_DEPTH = 1;
 const SPAWN_DROP_TOLERANCE = 1.5;
 const SPAWN_EDGE_PADDING = 0.72;
 const MIN_CAMERA_PITCH = 0.28;
@@ -39,12 +42,19 @@ const MAX_CAMERA_PITCH = 1.4;
 const MAP_SEED = Math.random() * 10000;
 const LAKE_CENTER_X = -HALF_MAP + 13 + Math.sin(MAP_SEED * 0.23) * 4;
 const LAKE_CENTER_Z = HALF_MAP - 16 + Math.cos(MAP_SEED * 0.19) * 5;
+const MAX_ACTIVE_CARDS = 5;
+const VILLAGE_SITES = [
+  { x: 0, z: -16, radius: 13, main: true },
+  { x: -28, z: 16, radius: 8 },
+  { x: 28, z: 14, radius: 8 },
+  { x: -30, z: -22, radius: 7 },
+  { x: 30, z: -25, radius: 7 },
+];
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10181b);
-scene.fog = new THREE.FogExp2(0x10181b, 0.004);
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -54,14 +64,14 @@ const renderer = new THREE.WebGLRenderer({
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 
-const camera = new THREE.PerspectiveCamera(24, window.innerWidth / window.innerHeight, 0.1, 360);
+const camera = new THREE.PerspectiveCamera(24, window.innerWidth / window.innerHeight, 0.1, 640);
 const cameraState = {
   target: new THREE.Vector3(0, 0, -2),
   yaw: 0,
   pitch: 0.92,
-  distance: 146,
+  distance: 226,
 };
 
 const raycaster = new THREE.Raycaster();
@@ -71,6 +81,7 @@ const tmpPoint = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 const clock = new THREE.Clock();
 
+const loader = new THREE.TextureLoader();
 const textureCache = new Map();
 
 const game = {
@@ -86,53 +97,154 @@ const game = {
 
 const world = new THREE.Group();
 const terrainGroup = new THREE.Group();
+const territoryGroup = new THREE.Group();
 const structureGroup = new THREE.Group();
 const unitGroup = new THREE.Group();
 const effectGroup = new THREE.Group();
 scene.add(world);
-world.add(terrainGroup, structureGroup, unitGroup, effectGroup);
+world.add(terrainGroup, territoryGroup, structureGroup, unitGroup, effectGroup);
 
 const structures = [];
+const goblinBuildings = [];
 const units = [];
 const projectiles = [];
 const particles = [];
 let baseStructure = null;
+const unlockedTerritory = new Set();
 
 const cards = [
   {
+    id: "claim",
+    title: "Claim",
+    type: "territory",
+    cost: 2,
+    level: 1,
+    upgradeBaseCost: 4,
+    unlocked: true,
+    active: true,
+    unlockCost: 0,
+  },
+  {
     id: "raiders",
     title: "Raiders",
-    countLabel: "x8",
+    type: "unit",
     unitType: "raider",
     cost: 3,
     count: 8,
     spread: 1.45,
     level: 1,
     upgradeBaseCost: 4,
+    unlocked: true,
+    active: true,
+    unlockCost: 0,
+  },
+  {
+    id: "spikes",
+    title: "Spikes",
+    type: "building",
+    buildingType: "spikes",
+    cost: 2,
+    level: 1,
+    upgradeBaseCost: 5,
+    unlocked: true,
+    active: true,
+    unlockCost: 0,
   },
   {
     id: "brutes",
     title: "Brutes",
-    countLabel: "x3",
+    type: "unit",
     unitType: "brute",
     cost: 5,
     count: 3,
     spread: 1.15,
     level: 1,
     upgradeBaseCost: 6,
+    unlocked: false,
+    active: false,
+    unlockCost: 5,
   },
   {
     id: "torches",
     title: "Torches",
-    countLabel: "x5",
+    type: "unit",
     unitType: "torch",
     cost: 4,
     count: 5,
     spread: 1.35,
     level: 1,
     upgradeBaseCost: 5,
+    unlocked: false,
+    active: false,
+    unlockCost: 4,
+  },
+  {
+    id: "den",
+    title: "Den",
+    type: "building",
+    buildingType: "den",
+    cost: 4,
+    level: 1,
+    upgradeBaseCost: 7,
+    unlocked: false,
+    active: false,
+    unlockCost: 7,
+  },
+  {
+    id: "catapult",
+    title: "Catapult",
+    type: "building",
+    buildingType: "catapult",
+    cost: 6,
+    level: 1,
+    upgradeBaseCost: 9,
+    unlocked: false,
+    active: false,
+    unlockCost: 10,
+  },
+  {
+    id: "drum",
+    title: "Drum",
+    type: "building",
+    buildingType: "drum",
+    cost: 3,
+    level: 1,
+    upgradeBaseCost: 6,
+    unlocked: false,
+    active: false,
+    unlockCost: 8,
   },
 ];
+
+async function loadTextureAsset(path, key = path) {
+  if (textureCache.has(key)) return textureCache.get(key);
+  const texture = await loader.loadAsync(path);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  textureCache.set(key, texture);
+  return texture;
+}
+
+const unitSpriteSheet = await loadTextureAsset("/assets/unit-sprites.png", "unit-sprites");
+
+function spriteSheetFrame(row, col) {
+  const key = `unit-frame-${row}-${col}`;
+  if (textureCache.has(key)) return textureCache.get(key);
+  const texture = unitSpriteSheet.clone();
+  texture.repeat.set(1 / 4, 1 / 5);
+  texture.offset.set(col / 4, 1 - (row + 1) / 5);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  textureCache.set(key, texture);
+  return texture;
+}
 
 function hexToRgb(hex) {
   const value = Number.parseInt(hex.replace("#", ""), 16);
@@ -261,6 +373,26 @@ const materials = {
     opacity: 0.36,
     side: THREE.DoubleSide,
   }),
+  territory: new THREE.MeshBasicMaterial({
+    color: 0x8eed71,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }),
+  territoryPreview: new THREE.MeshBasicMaterial({
+    color: 0xe4c153,
+    transparent: true,
+    opacity: 0.34,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  }),
+  territoryEdge: new THREE.LineBasicMaterial({
+    color: 0xe4c153,
+    transparent: true,
+    opacity: 0.34,
+    depthWrite: false,
+  }),
   shadow: new THREE.MeshBasicMaterial({
     color: 0x000000,
     transparent: true,
@@ -284,6 +416,35 @@ function materialSet(top, side = top, bottom = materials.dirt) {
 }
 
 function addBlock(x, y, z, sx, sy, sz, mats, group = terrainGroup) {
+  if (group !== terrainGroup && Math.max(sx, sy, sz) > 1.35) {
+    const blockGroup = new THREE.Group();
+    blockGroup.position.set(x, y, z);
+    const nx = Math.max(1, Math.ceil(sx / 1.05));
+    const ny = Math.max(1, Math.ceil(sy / 1.05));
+    const nz = Math.max(1, Math.ceil(sz / 1.05));
+    const cellX = sx / nx;
+    const cellY = sy / ny;
+    const cellZ = sz / nz;
+    for (let ix = 0; ix < nx; ix += 1) {
+      for (let iy = 0; iy < ny; iy += 1) {
+        for (let iz = 0; iz < nz; iz += 1) {
+          const mesh = new THREE.Mesh(cubeGeometry, mats);
+          mesh.position.set(
+            -sx / 2 + cellX / 2 + ix * cellX,
+            cellY / 2 + iy * cellY,
+            -sz / 2 + cellZ / 2 + iz * cellZ,
+          );
+          mesh.scale.set(cellX, cellY, cellZ);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          blockGroup.add(mesh);
+        }
+      }
+    }
+    group.add(blockGroup);
+    return blockGroup;
+  }
+
   const mesh = new THREE.Mesh(cubeGeometry, mats);
   mesh.position.set(x, y + sy / 2, z);
   mesh.scale.set(sx, sy, sz);
@@ -345,15 +506,30 @@ function createLighting() {
   scene.add(sun);
 }
 
+function distanceToSegment(px, pz, ax, az, bx, bz) {
+  const abx = bx - ax;
+  const abz = bz - az;
+  const apx = px - ax;
+  const apz = pz - az;
+  const lengthSq = abx * abx + abz * abz;
+  const t = lengthSq === 0 ? 0 : clamp((apx * abx + apz * abz) / lengthSq, 0, 1);
+  const dx = px - (ax + abx * t);
+  const dz = pz - (az + abz * t);
+  return Math.hypot(dx, dz);
+}
+
 function pathScore(x, z) {
-  const main = Math.abs(x) < 1.55 && z > -12 && z < HALF_MAP - 5;
-  const cross = Math.abs(z + 5) < 1.2 && Math.abs(x) < 12;
-  const gate = Math.abs(x) < 4 && z < -5 && z > -13;
-  return main || cross || gate;
+  const mainSite = VILLAGE_SITES[0];
+  const trunk = Math.abs(x) < 1.55 && z > mainSite.z - 9 && z < HALF_MAP - 6;
+  const gate = Math.abs(x - mainSite.x) < 4 && z < mainSite.z + 4 && z > mainSite.z - 5;
+  const villageRoad = VILLAGE_SITES.some((site) =>
+    !site.main && distanceToSegment(x, z, mainSite.x, mainSite.z + 4, site.x, site.z) < 1.28,
+  );
+  return trunk || gate || villageRoad;
 }
 
 function isVillagePlateau(x, z) {
-  return Math.abs(x) < 11.5 && z > -12.2 && z < 8.5;
+  return VILLAGE_SITES.some((site) => Math.hypot(x - site.x, z - site.z) < site.radius);
 }
 
 function waterScore(x, z) {
@@ -398,43 +574,55 @@ function terrainTopHeight(x, z) {
   return clamp(rolling + ridge + edgeRise, -0.12, 1.85);
 }
 
-function terrainTileMaterial(x, z) {
-  if (isWaterTile(x, z)) return materials.water;
-  if (isShoreTile(x, z)) return materials.sand;
-  if (pathScore(x, z)) return materials.path;
-  if (x > 7 && x < 12 && z > -1 && z < 4) return materials.farm;
-  if (x < -14 && z > 9 && z < 17) return materials.mud;
-  return materials.grassTop;
+function terrainMaterialKey(x, z) {
+  if (isWaterTile(x, z)) return "water";
+  if (isShoreTile(x, z)) return "sand";
+  if (pathScore(x, z)) return "path";
+  if ((x > 6 && x < 12 && z > -6 && z < 2) || (x < -34 && z > 12 && z < 20)) return "farm";
+  if (x < -36 && z > -31 && z < -18) return "mud";
+  return "grassTop";
 }
 
-function makeTerrainTileGeometry(x, z) {
+function terrainMaterialForKey(key) {
+  return {
+    water: materials.water,
+    sand: materials.sand,
+    path: materials.path,
+    farm: materials.farm,
+    mud: materials.mud,
+    grassTop: materials.grassTop,
+  }[key];
+}
+
+function terrainBuffers() {
+  return { positions: [], uvs: [], indices: [] };
+}
+
+function pushTerrainTile(buffers, x, z) {
+  const vertexOffset = buffers.positions.length / 3;
   const h00 = terrainTopHeight(x, z);
   const h10 = terrainTopHeight(x + 1, z);
   const h01 = terrainTopHeight(x, z + 1);
   const h11 = terrainTopHeight(x + 1, z + 1);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute([x, h00, z, x + 1, h10, z, x, h01, z + 1, x + 1, h11, z + 1], 3),
-  );
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
-  geometry.setIndex([0, 2, 1, 1, 2, 3]);
-  geometry.computeVertexNormals();
-  return geometry;
+  buffers.positions.push(x, h00, z, x + 1, h10, z, x, h01, z + 1, x + 1, h11, z + 1);
+  buffers.uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+  buffers.indices.push(vertexOffset, vertexOffset + 2, vertexOffset + 1, vertexOffset + 1, vertexOffset + 2, vertexOffset + 3);
 }
 
-function addTerrainSkirt(x0, z0, x1, z1, h0, h1) {
+function pushTerrainSkirt(buffers, x0, z0, x1, z1, h0, h1) {
+  const vertexOffset = buffers.positions.length / 3;
+  buffers.positions.push(x0, TERRAIN_BASE_Y, z0, x1, TERRAIN_BASE_Y, z1, x0, h0, z0, x1, h1, z1);
+  buffers.uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+  buffers.indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset + 1, vertexOffset + 3, vertexOffset + 2);
+}
+
+function geometryFromBuffers(buffers) {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute([x0, TERRAIN_BASE_Y, z0, x1, TERRAIN_BASE_Y, z1, x0, h0, z0, x1, h1, z1], 3),
-  );
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
-  geometry.setIndex([0, 1, 2, 1, 3, 2]);
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(buffers.positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uvs, 2));
+  geometry.setIndex(buffers.indices);
   geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, materials.rockSide);
-  mesh.receiveShadow = true;
-  terrainGroup.add(mesh);
+  return geometry;
 }
 
 function sampleTerrainHeight(x, z) {
@@ -453,44 +641,129 @@ function sampleTerrainHeight(x, z) {
   return hx0 + (hx1 - hx0) * tz;
 }
 
+function territoryKey(cx, cz) {
+  return `${cx},${cz}`;
+}
+
+function parseTerritoryKey(key) {
+  return key.split(",").map((part) => Number.parseInt(part, 10));
+}
+
+function territoryChunkFromPoint(point) {
+  if (!point) return null;
+  if (Math.abs(point.x) > HALF_MAP || Math.abs(point.z) > HALF_MAP) return null;
+  const cx = clamp(Math.floor((point.x + HALF_MAP) / TERRITORY_SIZE), 0, TERRITORY_CHUNKS - 1);
+  const cz = clamp(Math.floor((point.z + HALF_MAP) / TERRITORY_SIZE), 0, TERRITORY_CHUNKS - 1);
+  return { cx, cz, key: territoryKey(cx, cz) };
+}
+
+function territoryBounds(cx, cz) {
+  const x0 = -HALF_MAP + cx * TERRITORY_SIZE;
+  const z0 = -HALF_MAP + cz * TERRITORY_SIZE;
+  return { x0, z0, x1: x0 + TERRITORY_SIZE, z1: z0 + TERRITORY_SIZE };
+}
+
+function territoryCenter(cx, cz) {
+  const bounds = territoryBounds(cx, cz);
+  return new THREE.Vector3((bounds.x0 + bounds.x1) / 2, 0, (bounds.z0 + bounds.z1) / 2);
+}
+
+function isChunkUnlocked(cx, cz) {
+  return unlockedTerritory.has(territoryKey(cx, cz));
+}
+
+function isChunkUnlockable(cx, cz) {
+  if (cx < 0 || cz < 0 || cx >= TERRITORY_CHUNKS || cz >= TERRITORY_CHUNKS) return false;
+  if (isChunkUnlocked(cx, cz)) return false;
+  return [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ].some(([dx, dz]) => isChunkUnlocked(cx + dx, cz + dz));
+}
+
+function isPointInUnlockedTerritory(point) {
+  const chunk = territoryChunkFromPoint(point);
+  return !!chunk && unlockedTerritory.has(chunk.key);
+}
+
+function initializeTerritory() {
+  for (let cx = 0; cx < TERRITORY_CHUNKS; cx += 1) {
+    for (let cz = 0; cz < TERRITORY_CHUNKS; cz += 1) {
+      const edge =
+        cx < STARTING_TERRITORY_DEPTH ||
+        cz < STARTING_TERRITORY_DEPTH ||
+        cx >= TERRITORY_CHUNKS - STARTING_TERRITORY_DEPTH ||
+        cz >= TERRITORY_CHUNKS - STARTING_TERRITORY_DEPTH;
+      if (edge) unlockedTerritory.add(territoryKey(cx, cz));
+    }
+  }
+}
+
+function rebuildTerritoryOverlay() {
+  territoryGroup.clear();
+  const geometry = new THREE.PlaneGeometry(TERRITORY_SIZE - 0.16, TERRITORY_SIZE - 0.16);
+  geometry.rotateX(-Math.PI / 2);
+  const edgeGeometry = new THREE.EdgesGeometry(geometry);
+  for (const key of unlockedTerritory) {
+    const [cx, cz] = parseTerritoryKey(key);
+    const center = territoryCenter(cx, cz);
+    const mesh = new THREE.Mesh(geometry, materials.territory);
+    mesh.position.set(center.x, sampleTerrainHeight(center.x, center.z) + 0.18, center.z);
+    const edge = new THREE.LineSegments(edgeGeometry, materials.territoryEdge);
+    edge.position.copy(mesh.position);
+    territoryGroup.add(mesh, edge);
+  }
+}
+
+function territoryUnlockCost() {
+  return 2 + Math.floor(Math.max(0, unlockedTerritory.size - TERRITORY_CHUNKS * 4) / 18);
+}
+
+function unlockTerritoryAt(point) {
+  const chunk = territoryChunkFromPoint(point);
+  if (!chunk || !isChunkUnlockable(chunk.cx, chunk.cz)) return false;
+  const cost = territoryUnlockCost();
+  if (game.rage < cost) return false;
+  game.rage = clamp(game.rage - cost, 0, game.maxRage);
+  unlockedTerritory.add(chunk.key);
+  rebuildTerritoryOverlay();
+  createSpawnBurst(territoryCenter(chunk.cx, chunk.cz), 0xe4c153);
+  return true;
+}
+
 function createTerrain() {
+  const byMaterial = new Map();
   for (let x = -HALF_MAP; x < HALF_MAP; x += 1) {
     for (let z = -HALF_MAP; z < HALF_MAP; z += 1) {
       const cx = x + 0.5;
       const cz = z + 0.5;
-      const mesh = new THREE.Mesh(makeTerrainTileGeometry(x, z), terrainTileMaterial(cx, cz));
-      mesh.receiveShadow = true;
-      terrainGroup.add(mesh);
+      const key = terrainMaterialKey(cx, cz);
+      if (!byMaterial.has(key)) byMaterial.set(key, terrainBuffers());
+      pushTerrainTile(byMaterial.get(key), x, z);
     }
   }
 
-  for (let i = -HALF_MAP; i < HALF_MAP; i += 1) {
-    addTerrainSkirt(i, -HALF_MAP, i + 1, -HALF_MAP, terrainTopHeight(i, -HALF_MAP), terrainTopHeight(i + 1, -HALF_MAP));
-    addTerrainSkirt(i + 1, HALF_MAP, i, HALF_MAP, terrainTopHeight(i + 1, HALF_MAP), terrainTopHeight(i, HALF_MAP));
-    addTerrainSkirt(-HALF_MAP, i + 1, -HALF_MAP, i, terrainTopHeight(-HALF_MAP, i + 1), terrainTopHeight(-HALF_MAP, i));
-    addTerrainSkirt(HALF_MAP, i, HALF_MAP, i + 1, terrainTopHeight(HALF_MAP, i), terrainTopHeight(HALF_MAP, i + 1));
+  for (const [key, buffers] of byMaterial) {
+    const mesh = new THREE.Mesh(geometryFromBuffers(buffers), terrainMaterialForKey(key));
+    mesh.receiveShadow = true;
+    terrainGroup.add(mesh);
   }
 
-  const spawnMat = new THREE.MeshBasicMaterial({
-    color: 0x6e9e5c,
-    transparent: true,
-    opacity: 0.12,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const stripGeo = new THREE.PlaneGeometry(MAP_SIZE, SPAWN_BAND);
-  stripGeo.rotateX(-Math.PI / 2);
-  const north = new THREE.Mesh(stripGeo, spawnMat);
-  north.position.set(0, 1.05, -HALF_MAP + SPAWN_BAND / 2);
-  const south = north.clone();
-  south.position.z = HALF_MAP - SPAWN_BAND / 2;
-  const sideGeo = new THREE.PlaneGeometry(SPAWN_BAND, MAP_SIZE);
-  sideGeo.rotateX(-Math.PI / 2);
-  const west = new THREE.Mesh(sideGeo, spawnMat);
-  west.position.set(-HALF_MAP + SPAWN_BAND / 2, 1.06, 0);
-  const east = west.clone();
-  east.position.x = HALF_MAP - SPAWN_BAND / 2;
-  terrainGroup.add(north, south, west, east);
+  const skirtBuffers = terrainBuffers();
+  for (let i = -HALF_MAP; i < HALF_MAP; i += 1) {
+    pushTerrainSkirt(skirtBuffers, i, -HALF_MAP, i + 1, -HALF_MAP, terrainTopHeight(i, -HALF_MAP), terrainTopHeight(i + 1, -HALF_MAP));
+    pushTerrainSkirt(skirtBuffers, i + 1, HALF_MAP, i, HALF_MAP, terrainTopHeight(i + 1, HALF_MAP), terrainTopHeight(i, HALF_MAP));
+    pushTerrainSkirt(skirtBuffers, -HALF_MAP, i + 1, -HALF_MAP, i, terrainTopHeight(-HALF_MAP, i + 1), terrainTopHeight(-HALF_MAP, i));
+    pushTerrainSkirt(skirtBuffers, HALF_MAP, i, HALF_MAP, i + 1, terrainTopHeight(HALF_MAP, i), terrainTopHeight(HALF_MAP, i + 1));
+  }
+  const skirt = new THREE.Mesh(geometryFromBuffers(skirtBuffers), materials.rockSide);
+  skirt.receiveShadow = true;
+  terrainGroup.add(skirt);
+
+  initializeTerritory();
+  rebuildTerritoryOverlay();
 }
 
 function healthBar(width = 1.8) {
@@ -551,9 +824,9 @@ function addWallSegment(parent, x, z, w, d) {
   }
 }
 
-function createBase() {
+function createBase(x = 0, z = -16) {
   const base = new THREE.Group();
-  base.position.set(0, 0.1, -9.2);
+  base.position.set(x, sampleTerrainHeight(x, z) + 0.1, z);
   addBlock(0, 0, 0, 4.7, 2.7, 4.2, materialSet(materials.castle, materials.stone), base);
   addBlock(0, 2.65, 0, 3.6, 0.8, 3.1, materialSet(materials.trim, materials.castle), base);
   addBlock(-2.25, 0.05, -1.75, 1.1, 3.5, 1.1, materialSet(materials.castle), base);
@@ -576,11 +849,11 @@ function createBase() {
   baseStructure = entity;
 }
 
-function addGableRoof(parent, slopeMaterial, sideMaterial) {
-  const width = 3.42;
-  const depth = 2.9;
-  const height = 1.12;
-  const y = 1.2;
+function addGableRoof(parent, slopeMaterial, sideMaterial, options = {}) {
+  const width = options.width ?? 3.42;
+  const depth = options.depth ?? 2.9;
+  const height = options.height ?? 1.12;
+  const y = options.y ?? 1.2;
   const vertices = [
     -width / 2, y, -depth / 2,
     width / 2, y, -depth / 2,
@@ -613,7 +886,7 @@ function addGableRoof(parent, slopeMaterial, sideMaterial) {
 
 function createHouse(x, z, roof = "thatch") {
   const house = new THREE.Group();
-  house.position.set(x, 0.1, z);
+  house.position.set(x, sampleTerrainHeight(x, z) + 0.1, z);
   addBlock(0, 0, 0, 2.8, 1.35, 2.4, materialSet(materials.wood), house);
   addBlock(-0.82, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   addBlock(0.8, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
@@ -632,7 +905,7 @@ function createHouse(x, z, roof = "thatch") {
 
 function createTower(x, z) {
   const tower = new THREE.Group();
-  tower.position.set(x, 0.1, z);
+  tower.position.set(x, sampleTerrainHeight(x, z) + 0.1, z);
   addBlock(0, 0, 0, 1.9, 3.2, 1.9, materialSet(materials.castle, materials.stone), tower);
   addBlock(0, 3.05, 0, 2.25, 0.48, 2.25, materialSet(materials.trim, materials.castle), tower);
   for (let i = -1; i <= 1; i += 2) {
@@ -654,105 +927,157 @@ function createTower(x, z) {
   });
 }
 
-function createVillage() {
-  createBase();
-  createTower(-7.3, -7.6);
-  createTower(7.3, -7.6);
-  createTower(-5.8, -1.6);
-  createTower(5.8, -1.6);
-  createHouse(-7.5, -3.9, "thatch");
-  createHouse(7.6, -3.7, "red");
-  createHouse(-9.2, 2.8, "red");
-  createHouse(8.8, 2.2, "thatch");
-  createHouse(-4.4, 4.5, "thatch");
-  createHouse(4.5, 4.6, "red");
+function createVillageCluster(site) {
+  const houseCount = site.main ? 6 : 3 + Math.floor(rand(0, 2.99));
+  const towerCount = site.main ? 4 : 1 + Math.floor(rand(0, 1.99));
+  if (site.main) createBase(site.x, site.z);
 
-  for (let i = 0; i < 16; i += 1) {
-    const pos = new THREE.Vector3(rand(-8.5, 8.5), 0, rand(-2, 6.5));
-    spawnUnit("villager", pos, false);
+  for (let i = 0; i < towerCount; i += 1) {
+    const angle = (i / towerCount) * Math.PI * 2 + (site.main ? 0.75 : rand(-0.4, 0.4));
+    const radius = site.main ? 7.4 : site.radius - 1.8;
+    createTower(site.x + Math.cos(angle) * radius, site.z + Math.sin(angle) * radius);
   }
-  for (let i = 0; i < 7; i += 1) {
-    const pos = new THREE.Vector3(rand(-4.5, 4.5), 0, rand(-9.7, -5.2));
+
+  for (let i = 0; i < houseCount; i += 1) {
+    const angle = (i / houseCount) * Math.PI * 2 + rand(-0.28, 0.28);
+    const radius = rand(site.main ? 6.2 : 3.5, site.main ? 10.2 : site.radius - 1.2);
+    createHouse(site.x + Math.cos(angle) * radius, site.z + Math.sin(angle) * radius, i % 2 ? "red" : "thatch");
+  }
+
+  const villagers = site.main ? 18 : 7;
+  for (let i = 0; i < villagers; i += 1) {
+    const pos = new THREE.Vector3(site.x + rand(-site.radius * 0.55, site.radius * 0.55), 0, site.z + rand(-site.radius * 0.45, site.radius * 0.55));
+    const unit = spawnUnit("villager", pos, false);
+    unit.home = new THREE.Vector3(site.x, 0, site.z);
+  }
+
+  const knights = site.main ? 8 : 3;
+  for (let i = 0; i < knights; i += 1) {
+    const pos = new THREE.Vector3(site.x + rand(-site.radius * 0.35, site.radius * 0.35), 0, site.z + rand(-site.radius * 0.35, site.radius * 0.35));
     spawnUnit("knight", pos, false);
   }
 }
 
-function drawPx(ctx, x, y, w, h, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, w, h);
+function createVillage() {
+  for (const site of VILLAGE_SITES) createVillageCluster(site);
 }
 
-function createUnitTexture(type, frame = 0) {
-  const size = 18;
-  const canvasTexture = document.createElement("canvas");
-  canvasTexture.width = size;
-  canvasTexture.height = size;
-  const ctx = canvasTexture.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
-  const bob = frame % 2;
-  const step = frame % 4 < 2 ? -1 : 1;
+function registerGoblinBuilding(group, options) {
+  const building = {
+    id: crypto.randomUUID(),
+    type: options.type,
+    group,
+    position: group.position,
+    level: options.level ?? 1,
+    hp: options.hp,
+    maxHp: options.hp,
+    radius: options.radius ?? 1,
+    range: options.range ?? 0,
+    cooldown: options.cooldown ?? 1,
+    reload: rand(0, options.cooldown ?? 1),
+    alive: true,
+    spawned: 0,
+    healthBar: healthBar(options.barWidth ?? 1.2),
+  };
+  building.healthBar.position.set(0, options.barY ?? 1.6, 0);
+  group.add(building.healthBar);
+  goblinBuildings.push(building);
+  structureGroup.add(group);
+  return building;
+}
 
-  if (type === "raider" || type === "torch") {
-    drawPx(ctx, 4, 4 + bob, 10, 9, "#101010");
-    drawPx(ctx, 5, 3 + bob, 8, 6, "#62a33e");
-    drawPx(ctx, 3, 5 + bob, 2, 2, "#62a33e");
-    drawPx(ctx, 13, 5 + bob, 2, 2, "#62a33e");
-    drawPx(ctx, 6, 6 + bob, 2, 1, "#f0cf52");
-    drawPx(ctx, 10, 6 + bob, 2, 1, "#f0cf52");
-    drawPx(ctx, 6, 9 + bob, 6, 4, "#6f4320");
-    drawPx(ctx, 5 + step, 13, 3, 3, "#2d271e");
-    drawPx(ctx, 10 - step, 13, 3, 3, "#2d271e");
-    if (type === "torch") {
-      drawPx(ctx, 13, 8 + bob, 2, 6, "#6d3f1b");
-      drawPx(ctx, 13, 5 + bob, 3, 3, "#ff9b27");
-      drawPx(ctx, 14, 4 + bob, 1, 1, "#ffe169");
-    } else {
-      drawPx(ctx, 13, 9 + bob, 4, 1, "#d7d7d2");
-      drawPx(ctx, 15, 8 + bob, 1, 1, "#f4f4ef");
+function createGoblinDen(point, level) {
+  const den = new THREE.Group();
+  den.position.set(point.x, sampleTerrainHeight(point.x, point.z) + 0.08, point.z);
+  addBlock(0, 0, 0, 1.6, 0.9, 1.45, materialSet(materials.wood), den);
+  addBlock(-0.5, 0.08, 0.72, 0.36, 0.5, 0.16, materialSet(materials.mud), den);
+  addBlock(0.5, 0.08, 0.72, 0.36, 0.5, 0.16, materialSet(materials.mud), den);
+  addGableRoof(den, materials.thatchRoof, materials.thatchRoofSide, { width: 2.0, depth: 1.75, height: 0.62, y: 0.82 });
+  return registerGoblinBuilding(den, {
+    type: "den",
+    level,
+    hp: 220 + level * 45,
+    cooldown: Math.max(2.8, 6 - level * 0.35),
+    radius: 1.2,
+    barY: 2.35,
+  });
+}
+
+function createSpikeTrap(point, level) {
+  const trap = new THREE.Group();
+  trap.position.set(point.x, sampleTerrainHeight(point.x, point.z) + 0.06, point.z);
+  addBlock(0, 0, 0, 1.45, 0.14, 1.45, materialSet(materials.wood), trap);
+  for (let x = -0.45; x <= 0.45; x += 0.45) {
+    for (let z = -0.45; z <= 0.45; z += 0.45) {
+      addBlock(x, 0.12, z, 0.13, 0.45, 0.13, materialSet(materials.trim), trap);
     }
-  } else if (type === "brute") {
-    drawPx(ctx, 3, 3 + bob, 12, 11, "#101010");
-    drawPx(ctx, 5, 3 + bob, 8, 6, "#74a944");
-    drawPx(ctx, 4, 8 + bob, 10, 6, "#7b4a24");
-    drawPx(ctx, 6, 6 + bob, 2, 1, "#ffe169");
-    drawPx(ctx, 10, 6 + bob, 2, 1, "#ffe169");
-    drawPx(ctx, 14, 4 + bob, 2, 10, "#5b351b");
-    drawPx(ctx, 13, 3 + bob, 4, 3, "#8a552a");
-    drawPx(ctx, 5 + step, 14, 3, 3, "#2d271e");
-    drawPx(ctx, 10 - step, 14, 3, 3, "#2d271e");
-  } else if (type === "knight") {
-    drawPx(ctx, 4, 3 + bob, 10, 12, "#101010");
-    drawPx(ctx, 5, 3 + bob, 8, 5, "#b9bab2");
-    drawPx(ctx, 6, 4 + bob, 6, 2, "#4a4c4d");
-    drawPx(ctx, 5, 8 + bob, 8, 5, "#315a9d");
-    drawPx(ctx, 12, 8 + bob, 3, 5, "#a8aaa5");
-    drawPx(ctx, 3, 9 + bob, 3, 1, "#d5d5cf");
-    drawPx(ctx, 5 + step, 14, 3, 3, "#343434");
-    drawPx(ctx, 10 - step, 14, 3, 3, "#343434");
-  } else {
-    drawPx(ctx, 5, 4 + bob, 8, 11, "#17110d");
-    drawPx(ctx, 6, 3 + bob, 6, 5, "#c58b55");
-    drawPx(ctx, 5, 8 + bob, 8, 5, "#d8caa2");
-    drawPx(ctx, 7, 6 + bob, 1, 1, "#1a1310");
-    drawPx(ctx, 10, 6 + bob, 1, 1, "#1a1310");
-    drawPx(ctx, 5 + step, 14, 3, 3, "#4f3d28");
-    drawPx(ctx, 10 - step, 14, 3, 3, "#4f3d28");
   }
+  return registerGoblinBuilding(trap, {
+    type: "spikes",
+    level,
+    hp: 120 + level * 25,
+    cooldown: Math.max(0.65, 1.3 - level * 0.06),
+    radius: 1.3,
+    range: 1.55,
+    barY: 1.05,
+  });
+}
 
-  const texture = new THREE.CanvasTexture(canvasTexture);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  return texture;
+function createCatapult(point, level) {
+  const catapult = new THREE.Group();
+  catapult.position.set(point.x, sampleTerrainHeight(point.x, point.z) + 0.08, point.z);
+  addBlock(0, 0, 0, 1.8, 0.36, 1.4, materialSet(materials.wood), catapult);
+  addBlock(-0.58, 0.22, 0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
+  addBlock(0.58, 0.22, 0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
+  addBlock(-0.58, 0.22, -0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
+  addBlock(0.58, 0.22, -0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
+  addBlock(0, 0.46, -0.18, 0.28, 1.2, 0.24, materialSet(materials.wood), catapult);
+  addBlock(0, 1.3, 0.32, 0.22, 0.22, 1.55, materialSet(materials.trim), catapult);
+  return registerGoblinBuilding(catapult, {
+    type: "catapult",
+    level,
+    hp: 260 + level * 50,
+    cooldown: Math.max(1.6, 3.4 - level * 0.18),
+    radius: 1.45,
+    range: 15 + level * 0.9,
+    barY: 2.1,
+  });
+}
+
+function createWarDrum(point, level) {
+  const drum = new THREE.Group();
+  drum.position.set(point.x, sampleTerrainHeight(point.x, point.z) + 0.08, point.z);
+  addBlock(0, 0, 0, 1.25, 0.95, 1.25, materialSet(materials.banner, materials.wood), drum);
+  addBlock(-0.85, 0, 0, 0.18, 1.55, 0.18, materialSet(materials.trim), drum);
+  addBlock(0.85, 0, 0, 0.18, 1.55, 0.18, materialSet(materials.trim), drum);
+  addBlock(0, 1.42, 0, 1.9, 0.24, 0.18, materialSet(materials.banner), drum);
+  return registerGoblinBuilding(drum, {
+    type: "drum",
+    level,
+    hp: 190 + level * 38,
+    cooldown: 1,
+    radius: 1.2,
+    range: 7 + level * 0.4,
+    barY: 2.2,
+  });
+}
+
+function placeBuilding(card, point) {
+  game.rage = clamp(game.rage - cardManaCost(card), 0, game.maxRage);
+  const p = point.clone();
+  if (card.buildingType === "den") createGoblinDen(p, card.level);
+  if (card.buildingType === "spikes") createSpikeTrap(p, card.level);
+  if (card.buildingType === "catapult") createCatapult(p, card.level);
+  if (card.buildingType === "drum") createWarDrum(p, card.level);
+  createSpawnBurst(p, 0x83c16b);
 }
 
 const spriteFrameSets = {
-  raider: [0, 1, 2, 3].map((frame) => createUnitTexture("raider", frame)),
-  brute: [0, 1, 2, 3].map((frame) => createUnitTexture("brute", frame)),
-  torch: [0, 1, 2, 3].map((frame) => createUnitTexture("torch", frame)),
-  knight: [0, 1, 2, 3].map((frame) => createUnitTexture("knight", frame)),
-  villager: [0, 1, 2, 3].map((frame) => createUnitTexture("villager", frame)),
+  raider: [0, 1, 2, 3].map((frame) => spriteSheetFrame(0, frame)),
+  brute: [0, 1, 2, 3].map((frame) => spriteSheetFrame(1, frame)),
+  torch: [0, 1, 2, 3].map((frame) => spriteSheetFrame(2, frame)),
+  knight: [0, 1, 2, 3].map((frame) => spriteSheetFrame(3, frame)),
+  villager: [0, 1, 2, 3].map((frame) => spriteSheetFrame(4, frame)),
 };
 
 const spriteMaterials = Object.fromEntries(
@@ -862,7 +1187,8 @@ function spawnUnit(type, position, burst = true, level = 1) {
     position: sprite.position,
     velocity: new THREE.Vector3(),
     target: null,
-    wander: new THREE.Vector3(rand(-8, 8), 0, rand(-2, 8)),
+    home: new THREE.Vector3(position.x, 0, position.z),
+    wander: new THREE.Vector3(position.x + rand(-4, 4), 0, position.z + rand(-4, 4)),
     alive: true,
     frameSeed: Math.random() * 10,
   };
@@ -949,6 +1275,17 @@ function damageStructure(structure, amount) {
   }
 }
 
+function goblinDrumMultiplier(unit, stat) {
+  if (unit.team !== "goblin") return 1;
+  let boost = 1;
+  for (const building of goblinBuildings) {
+    if (!building.alive || building.type !== "drum") continue;
+    if (unit.position.distanceToSquared(building.position) > building.range * building.range) continue;
+    boost = Math.max(boost, stat === "speed" ? 1.12 + building.level * 0.03 : 1.16 + building.level * 0.04);
+  }
+  return boost;
+}
+
 function moveToward(unit, targetPosition, dt, stopDistance = 0) {
   tmpVec.copy(targetPosition).sub(unit.position);
   tmpVec.y = 0;
@@ -960,7 +1297,7 @@ function moveToward(unit, targetPosition, dt, stopDistance = 0) {
   tmpVec.normalize();
   const wiggle = Math.sin(game.time * 2.6 + unit.frameSeed) * 0.22;
   const side = new THREE.Vector3(-tmpVec.z, 0, tmpVec.x).multiplyScalar(wiggle);
-  unit.velocity.copy(tmpVec.add(side).normalize()).multiplyScalar(unit.speed);
+  unit.velocity.copy(tmpVec.add(side).normalize()).multiplyScalar(unit.speed * goblinDrumMultiplier(unit, "speed"));
   unit.position.addScaledVector(unit.velocity, dt);
   unit.position.x = clamp(unit.position.x, -HALF_MAP + 0.8, HALF_MAP - 0.8);
   unit.position.z = clamp(unit.position.z, -HALF_MAP + 0.8, HALF_MAP - 0.8);
@@ -985,8 +1322,9 @@ function updateGoblin(unit, dt) {
     unit.attackTimer -= dt;
     if (unit.attackTimer <= 0) {
       unit.attackTimer = unit.cooldown;
-      if (unit.target.sprite) damageUnit(unit.target, unit.damage);
-      else damageStructure(unit.target, unit.damage * (unit.type === "torch" ? 1.35 : 1));
+      const damage = unit.damage * goblinDrumMultiplier(unit, "damage");
+      if (unit.target.sprite) damageUnit(unit.target, damage);
+      else damageStructure(unit.target, damage * (unit.type === "torch" ? 1.35 : 1));
       createHitParticle(targetPos, unit.type === "torch" ? 0xf0a443 : 0xbfd07a);
     }
   }
@@ -1027,7 +1365,7 @@ function updateVillager(unit, dt) {
     }
   } else {
     if (unit.position.distanceTo(unit.wander) < 0.5 || Math.random() < 0.003) {
-      unit.wander.set(rand(-9, 9), 0, rand(-1, 7.8));
+      unit.wander.set(unit.home.x + rand(-5, 5), 0, unit.home.z + rand(-4, 5));
     }
     moveToward(unit, unit.wander, dt, 0.4);
   }
@@ -1054,7 +1392,7 @@ function shootTower(tower, target) {
     new THREE.BoxGeometry(0.12, 0.12, 0.5),
     new THREE.MeshBasicMaterial({ color: 0xf2d186 }),
   );
-  mesh.position.set(tower.position.x, 3.7, tower.position.z);
+  mesh.position.set(tower.position.x, tower.position.y + 3.7, tower.position.z);
   projectiles.push({
     mesh,
     target,
@@ -1159,12 +1497,67 @@ function updateDefenderSpawns(dt) {
   }
 }
 
+function updateGoblinBuildings(dt) {
+  for (const building of goblinBuildings) {
+    if (!building.alive) continue;
+    building.reload -= dt;
+    if (building.reload > 0) continue;
+
+    if (building.type === "den") {
+      const nearby = units.filter((unit) => unit.alive && unit.team === "goblin" && unit.position.distanceToSquared(building.position) < 36).length;
+      if (nearby < 6 + building.level && building.spawned < 4 + building.level * 2) {
+        building.reload = building.cooldown;
+        building.spawned += 1;
+        const pos = new THREE.Vector3(building.position.x + rand(-1.2, 1.2), 0, building.position.z + rand(-1.2, 1.2));
+        spawnUnit("raider", pos, true, building.level);
+      } else {
+        building.reload = 1.2;
+      }
+    }
+
+    if (building.type === "spikes") {
+      const targets = units.filter(
+        (unit) => unit.alive && unit.team === "defender" && unit.position.distanceToSquared(building.position) <= building.range * building.range,
+      );
+      if (targets.length) {
+        building.reload = building.cooldown;
+        for (const target of targets) {
+          damageUnit(target, 26 + building.level * 8);
+          createHitParticle(target.position, 0xddd0a8);
+        }
+      } else {
+        building.reload = 0.18;
+      }
+    }
+
+    if (building.type === "catapult") {
+      const target = nearestStructure(building.position, (structure) => structure.type !== "base" || building.position.distanceTo(structure.position) < 13);
+      if (target && building.position.distanceTo(target.position) <= building.range) {
+        building.reload = building.cooldown;
+        damageStructure(target, 42 + building.level * 12);
+        createHitParticle(target.position, 0xb6a58a);
+      } else {
+        building.reload = 0.45;
+      }
+    }
+  }
+}
+
 function cardCount(card) {
+  if (card.type !== "unit") return 1;
   return card.count + Math.floor((card.level - 1) * (card.id === "brutes" ? 0.7 : 1.35));
 }
 
 function cardUpgradeCost(card) {
   return card.level >= 7 ? null : card.upgradeBaseCost + card.level * 3;
+}
+
+function cardManaCost(card) {
+  return card.type === "territory" ? territoryUnlockCost() : card.cost;
+}
+
+function activeCardCount() {
+  return cards.filter((card) => card.unlocked && card.active).length;
 }
 
 function createCardArtDataUrl(card) {
@@ -1173,24 +1566,60 @@ function createCardArtDataUrl(card) {
   canvasArt.height = 48;
   const ctx = canvasArt.getContext("2d");
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = card.id === "brutes" ? "#463421" : card.id === "torches" ? "#27324a" : "#263a33";
+  ctx.fillStyle = card.type === "territory" ? "#263a33" : card.type === "building" ? "#2e3330" : card.id === "brutes" ? "#463421" : card.id === "torches" ? "#27324a" : "#263a33";
   ctx.fillRect(0, 0, 64, 48);
   ctx.fillStyle = "#1a211f";
   ctx.fillRect(0, 34, 64, 14);
-  const bodies = card.id === "brutes" ? [[24, 12, 18, 22]] : card.id === "torches" ? [[22, 12, 13, 20], [38, 18, 10, 16]] : [[12, 14, 10, 16], [27, 10, 12, 19], [43, 16, 9, 15]];
-  for (const [x, y, w, h] of bodies) {
-    ctx.fillStyle = "#101010";
-    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
-    ctx.fillStyle = "#5ea140";
-    ctx.fillRect(x + 2, y, w - 4, Math.max(5, Math.floor(h * 0.34)));
-    ctx.fillStyle = "#7a4826";
-    ctx.fillRect(x + 1, y + Math.floor(h * 0.35), w - 2, Math.floor(h * 0.38));
-    ctx.fillStyle = "#2e2318";
-    ctx.fillRect(x + 2, y + h - 4, 3, 4);
-    ctx.fillRect(x + w - 5, y + h - 4, 3, 4);
-    ctx.fillStyle = "#f3ce54";
-    ctx.fillRect(x + 3, y + 4, 2, 1);
-    ctx.fillRect(x + w - 5, y + 4, 2, 1);
+  if (card.type === "unit") {
+    const bodies = card.id === "brutes" ? [[24, 12, 18, 22]] : card.id === "torches" ? [[22, 12, 13, 20], [38, 18, 10, 16]] : [[12, 14, 10, 16], [27, 10, 12, 19], [43, 16, 9, 15]];
+    for (const [x, y, w, h] of bodies) {
+      ctx.fillStyle = "#101010";
+      ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+      ctx.fillStyle = "#5ea140";
+      ctx.fillRect(x + 2, y, w - 4, Math.max(5, Math.floor(h * 0.34)));
+      ctx.fillStyle = "#7a4826";
+      ctx.fillRect(x + 1, y + Math.floor(h * 0.35), w - 2, Math.floor(h * 0.38));
+      ctx.fillStyle = "#2e2318";
+      ctx.fillRect(x + 2, y + h - 4, 3, 4);
+      ctx.fillRect(x + w - 5, y + h - 4, 3, 4);
+      ctx.fillStyle = "#f3ce54";
+      ctx.fillRect(x + 3, y + 4, 2, 1);
+      ctx.fillRect(x + w - 5, y + 4, 2, 1);
+    }
+  }
+  if (card.id === "claim") {
+    ctx.fillStyle = "#7fc149";
+    ctx.fillRect(12, 10, 16, 16);
+    ctx.fillRect(31, 10, 16, 16);
+    ctx.fillRect(12, 29, 16, 10);
+    ctx.fillStyle = "#e4c153";
+    ctx.fillRect(29, 27, 8, 8);
+  }
+  if (card.id === "spikes") {
+    ctx.fillStyle = "#8b5b2e";
+    ctx.fillRect(14, 29, 36, 6);
+    ctx.fillStyle = "#d9d6c9";
+    for (let i = 0; i < 6; i += 1) ctx.fillRect(16 + i * 6, 17, 3, 14);
+  }
+  if (card.id === "den") {
+    ctx.fillStyle = "#6f4320";
+    ctx.fillRect(18, 20, 28, 16);
+    ctx.fillStyle = "#caa746";
+    ctx.fillRect(14, 14, 36, 9);
+  }
+  if (card.id === "catapult") {
+    ctx.fillStyle = "#8b5b2e";
+    ctx.fillRect(14, 28, 34, 6);
+    ctx.fillRect(28, 13, 6, 22);
+    ctx.fillStyle = "#aaa79a";
+    ctx.fillRect(36, 15, 8, 8);
+  }
+  if (card.id === "drum") {
+    ctx.fillStyle = "#9a2d27";
+    ctx.fillRect(22, 15, 20, 22);
+    ctx.fillStyle = "#edc15a";
+    ctx.fillRect(20, 13, 24, 5);
+    ctx.fillRect(20, 34, 24, 4);
   }
   if (card.id === "brutes") {
     ctx.fillStyle = "#8a562d";
@@ -1211,9 +1640,30 @@ function createCardArtDataUrl(card) {
 
 function upgradeCard(card) {
   const cost = cardUpgradeCost(card);
-  if (cost === null || game.spoils < cost) return;
+  if (!card.unlocked || cost === null || game.spoils < cost) return;
   game.spoils -= cost;
   card.level += 1;
+  buildDeck();
+  updateHud();
+}
+
+function unlockCard(card) {
+  if (card.unlocked || game.spoils < card.unlockCost) return;
+  game.spoils -= card.unlockCost;
+  card.unlocked = true;
+  if (activeCardCount() < MAX_ACTIVE_CARDS) card.active = true;
+  buildDeck();
+  updateHud();
+}
+
+function toggleCardActive(card) {
+  if (!card.unlocked) return;
+  if (card.active) {
+    if (activeCardCount() <= 1) return;
+    card.active = false;
+  } else if (activeCardCount() < MAX_ACTIVE_CARDS) {
+    card.active = true;
+  }
   buildDeck();
   updateHud();
 }
@@ -1228,17 +1678,25 @@ function buildDeck() {
     button.role = "button";
     button.tabIndex = 0;
     button.style.setProperty("--card-art", createCardArtDataUrl(card));
+    const detail = card.type === "unit" ? `x${cardCount(card)}` : card.type === "territory" ? "5x5" : "Build";
     button.innerHTML = `
-      <span class="cost">${card.cost}</span>
+      <span class="cost">${cardManaCost(card)}</span>
       <span class="card-level">Lv ${card.level}</span>
-      <span class="card-title"><span>${card.title}</span><span class="card-count">x${cardCount(card)}</span></span>
+      <span class="card-title"><span>${card.title}</span><span class="card-count">${detail}</span></span>
       <button class="upgrade-button" type="button" title="Upgrade with spoils">${cost === null ? "MAX" : `+ ${cost}`}</button>
+      <button class="deck-button" type="button">${card.unlocked ? (card.active ? "Bench" : "Add") : `Unlock ${card.unlockCost}`}</button>
     `;
     button.addEventListener("pointerdown", (event) => beginCardDrag(event, card));
     button.querySelector(".upgrade-button").addEventListener("pointerdown", (event) => event.stopPropagation());
     button.querySelector(".upgrade-button").addEventListener("click", (event) => {
       event.stopPropagation();
       upgradeCard(card);
+    });
+    button.querySelector(".deck-button").addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.querySelector(".deck-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (card.unlocked) toggleCardActive(card);
+      else unlockCard(card);
     });
     deckEl.append(button);
   }
@@ -1252,7 +1710,7 @@ spawnPreview.visible = false;
 scene.add(spawnPreview);
 
 function beginCardDrag(event, card) {
-  if (game.over || game.paused || game.rage < card.cost) return;
+  if (game.over || game.paused || !card.unlocked || !card.active || game.rage < cardManaCost(card)) return;
   event.preventDefault();
   const ghost = document.createElement("div");
   ghost.className = "drag-ghost";
@@ -1273,23 +1731,29 @@ function updateCardDrag(event) {
   dragState.ghost.style.left = `${event.clientX - 38}px`;
   dragState.ghost.style.top = `${event.clientY - 48}px`;
   const point = pointerToGround(event.clientX, event.clientY);
-  const spawnPoint = spawnPointForDrop(point);
-  dragState.point = spawnPoint;
-  dragState.valid = !!spawnPoint && game.rage >= dragState.card.cost;
+  const actionPoint = actionPointForDrop(dragState.card, point);
+  dragState.point = actionPoint;
+  dragState.valid = !!actionPoint && game.rage >= cardManaCost(dragState.card);
   spawnPreview.visible = !!point;
   if (point) {
-    const previewPoint = spawnPoint ?? point;
+    const previewPoint = actionPoint ?? point;
     spawnPreview.position.x = previewPoint.x;
     spawnPreview.position.z = previewPoint.z;
     spawnPreview.position.y = sampleTerrainHeight(previewPoint.x, previewPoint.z) + 0.08;
-    spawnPreview.material = dragState.valid ? materials.spawnGood : materials.spawnBad;
+    spawnPreview.material = dragState.valid
+      ? dragState.card.type === "territory"
+        ? materials.territoryPreview
+        : materials.spawnGood
+      : materials.spawnBad;
   }
 }
 
 function endCardDrag() {
   if (!dragState) return;
   if (dragState.valid && dragState.point) {
-    spawnSwarm(dragState.card, dragState.point);
+    if (dragState.card.type === "territory") unlockTerritoryAt(dragState.point);
+    if (dragState.card.type === "unit") spawnSwarm(dragState.card, dragState.point);
+    if (dragState.card.type === "building") placeBuilding(dragState.card, dragState.point);
   }
   dragState.ghost.remove();
   dragState = null;
@@ -1297,55 +1761,39 @@ function endCardDrag() {
 }
 
 function canSpawnAt(point) {
-  return !!spawnPointForDrop(point);
+  return !!point && isPointInUnlockedTerritory(point) && !isWaterTile(point.x, point.z);
 }
 
-function spawnSides(point) {
-  const innerLimit = HALF_MAP - SPAWN_BAND;
-  const sides = [];
-  if (point.z <= -innerLimit) sides.push("north");
-  if (point.z >= innerLimit) sides.push("south");
-  if (point.x <= -innerLimit) sides.push("west");
-  if (point.x >= innerLimit) sides.push("east");
-  return sides;
-}
-
-function spawnPointForDrop(point) {
+function actionPointForDrop(card, point) {
   if (!point) return null;
   const outerLimit = HALF_MAP + SPAWN_DROP_TOLERANCE;
   if (Math.abs(point.x) > outerLimit || Math.abs(point.z) > outerLimit) return null;
-
   const clamped = new THREE.Vector3(
     clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
     0,
     clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
   );
-  return spawnSides(clamped).length > 0 ? clamped : null;
-}
-
-function clampToSpawnBand(point, sides) {
-  const innerLimit = HALF_MAP - SPAWN_BAND;
-  point.x = clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING);
-  point.z = clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING);
-
-  if (sides.includes("west")) point.x = clamp(point.x, -HALF_MAP + SPAWN_EDGE_PADDING, -innerLimit);
-  if (sides.includes("east")) point.x = clamp(point.x, innerLimit, HALF_MAP - SPAWN_EDGE_PADDING);
-  if (sides.includes("north")) point.z = clamp(point.z, -HALF_MAP + SPAWN_EDGE_PADDING, -innerLimit);
-  if (sides.includes("south")) point.z = clamp(point.z, innerLimit, HALF_MAP - SPAWN_EDGE_PADDING);
-  return point;
+  if (card.type === "territory") {
+    const chunk = territoryChunkFromPoint(clamped);
+    if (!chunk || !isChunkUnlockable(chunk.cx, chunk.cz)) return null;
+    return territoryCenter(chunk.cx, chunk.cz);
+  }
+  if (!canSpawnAt(clamped)) return null;
+  return clamped;
 }
 
 function spawnSwarm(card, point) {
-  const sides = spawnSides(point);
-  game.rage = clamp(game.rage - card.cost, 0, game.maxRage);
+  game.rage = clamp(game.rage - cardManaCost(card), 0, game.maxRage);
   const count = cardCount(card);
   for (let i = 0; i < count; i += 1) {
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.sqrt(Math.random()) * card.spread;
-    const pos = clampToSpawnBand(
-      new THREE.Vector3(point.x + Math.cos(angle) * radius, 0, point.z + Math.sin(angle) * radius),
-      sides,
+    const candidate = new THREE.Vector3(
+      clamp(point.x + Math.cos(angle) * radius, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
+      0,
+      clamp(point.z + Math.sin(angle) * radius, -HALF_MAP + SPAWN_EDGE_PADDING, HALF_MAP - SPAWN_EDGE_PADDING),
     );
+    const pos = canSpawnAt(candidate) ? candidate : point.clone();
     spawnUnit(card.unitType, pos, true, card.level);
   }
 }
@@ -1433,7 +1881,7 @@ function pitchCamera(amount) {
 }
 
 function zoomCamera(factor) {
-  cameraState.distance = clamp(cameraState.distance * factor, 18, 214);
+  cameraState.distance = clamp(cameraState.distance * factor, 18, 340);
   updateCamera();
 }
 
@@ -1441,7 +1889,7 @@ function resetCamera() {
   cameraState.target.set(0, 0, -2);
   cameraState.yaw = 0;
   cameraState.pitch = 0.92;
-  cameraState.distance = 146;
+  cameraState.distance = 226;
   updateCamera();
 }
 
@@ -1457,15 +1905,22 @@ function updateHud() {
   defenderReadout.textContent = units.filter((unit) => unit.team === "defender").length;
   structureReadout.textContent = structures.filter((structure) => structure.alive).length;
   spoilsReadout.textContent = game.spoils;
+  territoryReadout.textContent = `${unlockedTerritory.size}/${TERRITORY_CHUNKS * TERRITORY_CHUNKS}`;
 
   for (const cardEl of deckEl.querySelectorAll(".card")) {
     const card = cards.find((item) => item.id === cardEl.dataset.card);
-    const cannotDeploy = game.paused || game.over || game.rage < card.cost;
+    const cannotDeploy = game.paused || game.over || !card.unlocked || !card.active || game.rage < cardManaCost(card);
     cardEl.classList.toggle("disabled", cannotDeploy);
+    cardEl.classList.toggle("locked", !card.unlocked);
+    cardEl.classList.toggle("benched", card.unlocked && !card.active);
     cardEl.setAttribute("aria-disabled", String(cannotDeploy));
+    cardEl.querySelector(".cost").textContent = cardManaCost(card);
     const upgradeButton = cardEl.querySelector(".upgrade-button");
     const upgradeCost = cardUpgradeCost(card);
-    upgradeButton.disabled = game.over || upgradeCost === null || game.spoils < upgradeCost;
+    upgradeButton.disabled = game.over || !card.unlocked || upgradeCost === null || game.spoils < upgradeCost;
+    const deckButton = cardEl.querySelector(".deck-button");
+    deckButton.textContent = card.unlocked ? (card.active ? "Bench" : "Add") : `Unlock ${card.unlockCost}`;
+    deckButton.disabled = game.over || (!card.unlocked && game.spoils < card.unlockCost) || (card.unlocked && !card.active && activeCardCount() >= MAX_ACTIVE_CARDS);
   }
 }
 
@@ -1526,6 +1981,7 @@ function animate() {
     game.time += dt;
     game.rage = clamp(game.rage + dt * 0.62, 0, game.maxRage);
     updateUnits(dt);
+    updateGoblinBuildings(dt);
     updateTowers(dt);
     updateProjectiles(dt);
     updateParticles(dt);

@@ -1,6 +1,6 @@
 # Goblin Tower Offense 3D
 
-A small Three.js tower offense prototype built around a sloped low-poly terrain map, blocky medieval structures, low-definition procedural pixel-art materials, and billboard sprite units.
+A small Three.js tower offense prototype built around a large sloped low-poly terrain map, blocky medieval villages, image-generated pixel-art units, procedural block textures, deck building, territory claiming, and billboard sprite combat.
 
 ## Run
 
@@ -17,12 +17,14 @@ Or use `Launch Goblin Tower Offense 3D.cmd` / the Desktop shortcut to start the 
 - Mouse wheel zooms.
 - Use the zoom buttons or `+` / `-` for extra camera control.
 - Right-drag, `Q`, or `E` rotates the camera.
-- Drag troop cards onto the outer map bands to spawn swarms.
-- Spend spoils on card upgrades to improve goblin levels and swarm sizes.
+- Drag active troop and building cards onto unlocked territory.
+- Drag the Claim card onto a locked adjacent `5 x 5` territory chunk to unlock more deployment space with mana.
+- Spend spoils to unlock new cards, swap cards in and out of the active deck, and upgrade cards.
 
 ## Art
 
-The in-game pixel art is generated from tiny canvas drawings and nearest-neighbor procedural textures at runtime, keeping the look deliberately chunky and low definition. The launcher icon remains in `public/assets`:
+The unit sprites use an image-generated pixel-art spritesheet that is processed into transparent `5 x 4` animation frames. Terrain and building surfaces use nearest-neighbor procedural textures so large 3D structures can be assembled from smaller blocks instead of stretched atlas faces. The launcher icon remains in `public/assets`:
 
+- `unit-sprites.png`: processed transparent unit spritesheet.
 - `game-icon.png`: source icon artwork.
 - `game-icon.ico`: Windows shortcut icon.

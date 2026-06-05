@@ -215,16 +215,18 @@ button {
   display: flex;
   gap: 10px;
   align-items: stretch;
-  width: min(620px, calc(100vw - 24px));
+  width: min(930px, calc(100vw - 24px));
   padding: 10px;
+  overflow-x: auto;
+  scrollbar-width: thin;
   border-radius: 8px;
   transform: translateX(-50%);
 }
 
 .card {
   position: relative;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 132px;
+  min-width: 132px;
   height: clamp(96px, 16vh, 126px);
   overflow: hidden;
   border: 1px solid rgba(244, 239, 225, 0.18);
@@ -239,6 +241,14 @@ button {
 .card.disabled {
   filter: grayscale(0.55) brightness(0.72);
   cursor: default;
+}
+
+.card.locked {
+  filter: grayscale(0.75) brightness(0.58);
+}
+
+.card.benched {
+  opacity: 0.72;
 }
 
 .card:active {
@@ -317,10 +327,9 @@ button {
   line-height: 1;
 }
 
-.upgrade-button {
+.upgrade-button,
+.deck-button {
   position: absolute;
-  right: 7px;
-  top: 36px;
   min-width: 38px;
   height: 24px;
   border: 1px solid rgba(255, 246, 215, 0.34);
@@ -333,7 +342,20 @@ button {
   line-height: 1;
 }
 
-.upgrade-button:disabled {
+.upgrade-button {
+  right: 7px;
+  top: 36px;
+}
+
+.deck-button {
+  left: 7px;
+  top: 42px;
+  min-width: 54px;
+  background: #283a52;
+}
+
+.upgrade-button:disabled,
+.deck-button:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -399,6 +421,8 @@ button {
   }
 
   .card {
+    flex-basis: 116px;
+    min-width: 116px;
     height: 92px;
   }
 
