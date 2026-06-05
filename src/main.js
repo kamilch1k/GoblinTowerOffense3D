@@ -173,6 +173,7 @@ function atlasSlice(col, row, slice, cols = 4, rows = 4, source = blockAtlas, ca
 const ISO_TOP_SLICE = { x: 0.04, y: 0.02, width: 0.92, height: 0.58 };
 const ISO_SIDE_SLICE = { x: 0.04, y: 0.57, width: 0.92, height: 0.41 };
 const FLAT_GROUND_SLICE = { x: 0.04, y: 0.04, width: 0.92, height: 0.92 };
+const ATLAS_CLEAN_SLICE = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
 function hexToRgb(hex) {
   const value = Number.parseInt(hex.replace("#", ""), 16);
@@ -264,6 +265,13 @@ function terrainMaterial(kind, base, flecks, options = {}) {
   });
 }
 
+function atlasMaterial(col, row, roughness = 0.9) {
+  return new THREE.MeshStandardMaterial({
+    map: atlasSlice(col, row, ATLAS_CLEAN_SLICE, 4, 4, blockAtlas, "building"),
+    roughness,
+  });
+}
+
 const materials = {
   grassTop: terrainMaterial("grassTop", "#4f9d3d", ["#73bd48", "#326f32", "#d8d566"]),
   grassSide: terrainMaterial("grassSide", "#8a5b2d", ["#6e4424", "#a3703d", "#5f8d38"]),
@@ -272,20 +280,20 @@ const materials = {
     roughness: 0.42,
   }),
   rockSide: terrainMaterial("rockSide", "#64645f", ["#8b8b83", "#444642", "#737b68"]),
-  dirt: new THREE.MeshStandardMaterial({ map: atlasTile(1, 0), roughness: 0.98 }),
-  stone: new THREE.MeshStandardMaterial({ map: atlasTile(2, 0), roughness: 0.9 }),
-  cobble: new THREE.MeshStandardMaterial({ map: atlasTile(3, 0), roughness: 0.92 }),
-  wood: new THREE.MeshStandardMaterial({ map: atlasTile(0, 1), roughness: 0.86 }),
-  thatch: new THREE.MeshStandardMaterial({ map: atlasTile(1, 1), roughness: 0.96 }),
-  castle: new THREE.MeshStandardMaterial({ map: atlasTile(2, 1), roughness: 0.85 }),
+  dirt: atlasMaterial(1, 0, 0.98),
+  stone: atlasMaterial(2, 0, 0.9),
+  cobble: atlasMaterial(3, 0, 0.92),
+  wood: atlasMaterial(0, 1, 0.86),
+  thatch: atlasMaterial(1, 1, 0.96),
+  castle: atlasMaterial(2, 1, 0.85),
   path: terrainMaterial("path", "#a88952", ["#d2b477", "#72583a", "#b9a063"]),
   moss: terrainMaterial("moss", "#768252", ["#95a56a", "#4d5f36", "#8a9160"]),
   farm: terrainMaterial("farm", "#63411f", ["#8a5c2d", "#4d3119", "#83ba4a"]),
   cliff: terrainMaterial("cliff", "#64645f", ["#85857d", "#41433f", "#767966"]),
-  trim: new THREE.MeshStandardMaterial({ map: atlasTile(0, 3), roughness: 0.75 }),
-  roof: new THREE.MeshStandardMaterial({ map: atlasTile(1, 3), roughness: 0.86 }),
+  trim: atlasMaterial(0, 3, 0.75),
+  roof: atlasMaterial(1, 3, 0.86),
   mud: terrainMaterial("mud", "#60401f", ["#7a532c", "#382715", "#8a673b"]),
-  banner: new THREE.MeshStandardMaterial({ map: atlasTile(3, 3), roughness: 0.7 }),
+  banner: atlasMaterial(3, 3, 0.7),
   spawnGood: new THREE.MeshBasicMaterial({
     color: 0x8eed71,
     transparent: true,
@@ -344,6 +352,10 @@ function makeRampGeometry(direction = "north") {
   ];
   const geom = new THREE.BufferGeometry();
   geom.setAttribute("position", new THREE.Float32BufferAttribute(base.flat(), 3));
+  geom.setAttribute(
+    "uv",
+    new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0], 2),
+  );
   geom.setIndex(index);
   geom.computeVertexNormals();
 
@@ -566,6 +578,14 @@ function createBase() {
   baseStructure = entity;
 }
 
+function addSteppedRoof(parent, roofMat) {
+  const roofMats = materialSet(roofMat, roofMat, roofMat);
+  addBlock(0, 1.2, 0, 3.34, 0.28, 2.86, roofMats, parent);
+  addBlock(0, 1.48, 0, 2.42, 0.32, 2.86, roofMats, parent);
+  addBlock(0, 1.8, 0, 1.42, 0.34, 2.86, roofMats, parent);
+  addBlock(0, 2.14, 0, 0.42, 0.34, 2.86, roofMats, parent);
+}
+
 function createHouse(x, z, roof = "thatch") {
   const house = new THREE.Group();
   house.position.set(x, 0.1, z);
@@ -573,9 +593,7 @@ function createHouse(x, z, roof = "thatch") {
   addBlock(-0.82, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   addBlock(0.8, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   const roofMat = roof === "red" ? materials.roof : materials.thatch;
-  addRamp(-0.72, 1.22, 0, 1.55, 1.05, 2.7, "west", roofMat, house);
-  addRamp(0.72, 1.22, 0, 1.55, 1.05, 2.7, "east", roofMat, house);
-  addBlock(0, 2.18, 0, 0.2, 0.18, 2.72, materialSet(roofMat), house);
+  addSteppedRoof(house, roofMat);
   return registerStructure(house, {
     type: "house",
     hp: 360,

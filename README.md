@@ -9,6 +9,8 @@ npm install
 npm run dev
 ```
 
+Or use `Launch Goblin Tower Offense 3D.cmd` / the Desktop shortcut to start the local dev server and open the game.
+
 ## Controls
 
 - Drag the map to pan the commander camera.
