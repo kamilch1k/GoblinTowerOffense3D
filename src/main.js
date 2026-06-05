@@ -28,9 +28,13 @@ const pauseToggle = document.querySelector("#pauseToggle");
 
 const MAP_SIZE = 36;
 const HALF_MAP = MAP_SIZE / 2;
+const TERRAIN_BASE_Y = -0.78;
+const TILE_SCALE = 1.012;
 const SPAWN_BAND = 5;
 const SPAWN_DROP_TOLERANCE = 1.5;
 const SPAWN_EDGE_PADDING = 0.72;
+const MIN_CAMERA_PITCH = 0.18;
+const MAX_CAMERA_PITCH = 1.48;
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -170,29 +174,117 @@ const ISO_TOP_SLICE = { x: 0.04, y: 0.02, width: 0.92, height: 0.58 };
 const ISO_SIDE_SLICE = { x: 0.04, y: 0.57, width: 0.92, height: 0.41 };
 const FLAT_GROUND_SLICE = { x: 0.04, y: 0.04, width: 0.92, height: 0.92 };
 
+function hexToRgb(hex) {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function colorString(rgb, shade = 0) {
+  const channels = rgb.map((channel) => clamp(Math.round(channel + shade), 0, 255));
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+function pixelNoise(x, y, seed) {
+  return Math.sin((x + 1) * 12.9898 + (y + 3) * 78.233 + seed * 37.719) % 1;
+}
+
+function createPixelTexture(kind, baseHex, fleckHexes = []) {
+  const size = 32;
+  const canvasTexture = document.createElement("canvas");
+  canvasTexture.width = size;
+  canvasTexture.height = size;
+  const ctx = canvasTexture.getContext("2d");
+  const base = hexToRgb(baseHex);
+  const flecks = fleckHexes.map(hexToRgb);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const shade = Math.floor(pixelNoise(x, y, kind.length) * 16) - 8;
+      ctx.fillStyle = colorString(base, shade);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  for (let i = 0; i < 76; i += 1) {
+    const x = Math.floor(Math.abs(pixelNoise(i, i * 2, kind.length + 4)) * size);
+    const y = Math.floor(Math.abs(pixelNoise(i * 3, i, kind.length + 9)) * size);
+    const color = flecks[i % Math.max(1, flecks.length)] ?? base;
+    ctx.fillStyle = colorString(color, Math.floor(pixelNoise(i, y, 2) * 10));
+    ctx.fillRect(x, y, kind === "water" ? 3 : 1, 1);
+  }
+
+  if (kind === "grassSide") {
+    ctx.fillStyle = "#4f9b3b";
+    ctx.fillRect(0, 0, size, 6);
+    ctx.fillStyle = "#3b7c35";
+    for (let x = 0; x < size; x += 2) ctx.fillRect(x, 5 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 3), 1, 2);
+  }
+
+  if (kind === "path") {
+    for (let y = 8; y < size; y += 8) {
+      ctx.fillStyle = "rgba(92, 68, 43, 0.34)";
+      ctx.fillRect(0, y, size, 1);
+    }
+  }
+
+  if (kind === "farm") {
+    for (let x = 4; x < size; x += 7) {
+      ctx.fillStyle = "#7f5629";
+      ctx.fillRect(x, 0, 3, size);
+      ctx.fillStyle = "#7fc149";
+      for (let y = 3; y < size; y += 7) ctx.fillRect(x + 1, y, 1, 3);
+    }
+  }
+
+  if (kind === "water") {
+    ctx.fillStyle = "rgba(145, 218, 242, 0.45)";
+    for (let y = 6; y < size; y += 9) {
+      for (let x = 0; x < size; x += 8) ctx.fillRect(x + ((y / 3) % 5), y, 5, 1);
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvasTexture);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  textureCache.set(`terrain-${kind}`, texture);
+  return texture;
+}
+
+function terrainMaterial(kind, base, flecks, options = {}) {
+  return new THREE.MeshStandardMaterial({
+    map: createPixelTexture(kind, base, flecks),
+    roughness: options.roughness ?? 0.95,
+    metalness: 0,
+    transparent: options.transparent ?? false,
+    opacity: options.opacity ?? 1,
+  });
+}
+
 const materials = {
-  grassTop: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 0, ISO_TOP_SLICE), roughness: 0.96 }),
-  grassSide: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 0, ISO_SIDE_SLICE), roughness: 0.98 }),
+  grassTop: terrainMaterial("grassTop", "#4f9d3d", ["#73bd48", "#326f32", "#d8d566"]),
+  grassSide: terrainMaterial("grassSide", "#8a5b2d", ["#6e4424", "#a3703d", "#5f8d38"]),
+  sand: terrainMaterial("sand", "#c9b36c", ["#ead18a", "#aa8f52", "#8c7446"]),
+  water: terrainMaterial("water", "#1c77ad", ["#2d9bd1", "#0e4e83", "#8ad8ed"], {
+    roughness: 0.42,
+  }),
+  rockSide: terrainMaterial("rockSide", "#64645f", ["#8b8b83", "#444642", "#737b68"]),
   dirt: new THREE.MeshStandardMaterial({ map: atlasTile(1, 0), roughness: 0.98 }),
   stone: new THREE.MeshStandardMaterial({ map: atlasTile(2, 0), roughness: 0.9 }),
   cobble: new THREE.MeshStandardMaterial({ map: atlasTile(3, 0), roughness: 0.92 }),
   wood: new THREE.MeshStandardMaterial({ map: atlasTile(0, 1), roughness: 0.86 }),
   thatch: new THREE.MeshStandardMaterial({ map: atlasTile(1, 1), roughness: 0.96 }),
   castle: new THREE.MeshStandardMaterial({ map: atlasTile(2, 1), roughness: 0.85 }),
-  path: new THREE.MeshStandardMaterial({ map: atlasSlice(3, 1, FLAT_GROUND_SLICE), roughness: 0.98 }),
-  moss: new THREE.MeshStandardMaterial({ map: atlasSlice(0, 2, FLAT_GROUND_SLICE), roughness: 0.95 }),
-  farm: new THREE.MeshStandardMaterial({ map: atlasSlice(1, 2, FLAT_GROUND_SLICE), roughness: 0.98 }),
-  water: new THREE.MeshStandardMaterial({
-    map: atlasSlice(2, 2, FLAT_GROUND_SLICE),
-    roughness: 0.36,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.92,
-  }),
-  cliff: new THREE.MeshStandardMaterial({ map: atlasTile(3, 2), roughness: 0.94 }),
+  path: terrainMaterial("path", "#a88952", ["#d2b477", "#72583a", "#b9a063"]),
+  moss: terrainMaterial("moss", "#768252", ["#95a56a", "#4d5f36", "#8a9160"]),
+  farm: terrainMaterial("farm", "#63411f", ["#8a5c2d", "#4d3119", "#83ba4a"]),
+  cliff: terrainMaterial("cliff", "#64645f", ["#85857d", "#41433f", "#767966"]),
   trim: new THREE.MeshStandardMaterial({ map: atlasTile(0, 3), roughness: 0.75 }),
   roof: new THREE.MeshStandardMaterial({ map: atlasTile(1, 3), roughness: 0.86 }),
-  mud: new THREE.MeshStandardMaterial({ map: atlasSlice(2, 3, FLAT_GROUND_SLICE), roughness: 0.98 }),
+  mud: terrainMaterial("mud", "#60401f", ["#7a532c", "#382715", "#8a673b"]),
   banner: new THREE.MeshStandardMaterial({ map: atlasTile(3, 3), roughness: 0.7 }),
   spawnGood: new THREE.MeshBasicMaterial({
     color: 0x8eed71,
@@ -293,25 +385,72 @@ function pathScore(x, z) {
   return main || cross || gate;
 }
 
+function isVillagePlateau(x, z) {
+  return Math.abs(x) < 10.8 && z > -11.2 && z < 7.5;
+}
+
+function waterScore(x, z) {
+  const lake = ((x + 13.6) / 4.5) ** 2 + ((z - 9.2) / 5.5) ** 2;
+  const inlet = ((x + 16.2) / 2.5) ** 2 + ((z - 3.2) / 3.2) ** 2;
+  return Math.min(lake, inlet);
+}
+
+function isWaterTile(x, z) {
+  return waterScore(x, z) < 1;
+}
+
+function isShoreTile(x, z) {
+  if (isWaterTile(x, z)) return false;
+  const neighbors = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+  ];
+  return neighbors.some(([dx, dz]) => isWaterTile(x + dx, z + dz));
+}
+
+function terrainTopHeight(x, z) {
+  if (isWaterTile(x, z)) return -0.32;
+  if (isShoreTile(x, z)) return -0.06;
+  if (pathScore(x, z) || isVillagePlateau(x, z)) return 0;
+
+  const edgeRise = Math.max(Math.abs(x), Math.abs(z)) > 15 ? 0.72 : Math.max(Math.abs(x), Math.abs(z)) > 12.5 ? 0.36 : 0;
+  const westernRidge = x < -9 && z < -5 ? 0.36 : 0;
+  const southeastHill = x > 9 && z > 7 ? 0.72 : x > 8 && z > 4 ? 0.36 : 0;
+  const northStep = z < -13 && Math.abs(x) > 7 ? 0.36 : 0;
+  const roughness = Math.sin(x * 1.7 + z * 0.6) + Math.sin(z * 1.25 - x * 0.8);
+  const blockNoise = roughness > 1.25 ? 0.36 : roughness < -1.15 ? -0.18 : 0;
+  return clamp(edgeRise + westernRidge + southeastHill + northStep + blockNoise, -0.06, 1.08);
+}
+
 function createTerrain() {
   const grassSet = materialSet(materials.grassTop, materials.grassSide, materials.grassSide);
   const pathSet = materialSet(materials.path, materials.grassSide, materials.grassSide);
   const farmSet = materialSet(materials.farm, materials.grassSide, materials.grassSide);
   const mudSet = materialSet(materials.mud, materials.grassSide, materials.grassSide);
-  const waterSet = materialSet(materials.water, materials.cliff);
+  const waterSet = materialSet(materials.water, materials.rockSide, materials.rockSide);
+  const sandSet = materialSet(materials.sand, materials.grassSide, materials.grassSide);
 
   for (let x = -HALF_MAP; x < HALF_MAP; x += 1) {
     for (let z = -HALF_MAP; z < HALF_MAP; z += 1) {
       const cx = x + 0.5;
       const cz = z + 0.5;
-      const dist = Math.max(Math.abs(cx), Math.abs(cz));
-      const height = dist > 16.5 ? 0.42 : dist > 14.5 ? 0.22 : 0.12;
+      const topHeight = terrainTopHeight(cx, cz);
+      const blockHeight = Math.max(0.14, topHeight - TERRAIN_BASE_Y);
       let mats = grassSet;
-      if (pathScore(cx, cz)) mats = pathSet;
-      if (x > 7 && x < 12 && z > -1 && z < 4) mats = farmSet;
-      if (x < -15 && z > 5 && z < 13) mats = waterSet;
-      if (x < -11 && z > 9 && z < 15) mats = mudSet;
-      addBlock(cx, -0.42, cz, 1, height, 1, mats);
+      const water = isWaterTile(cx, cz);
+      const shore = isShoreTile(cx, cz);
+      if (water) mats = waterSet;
+      else if (shore) mats = sandSet;
+      else if (pathScore(cx, cz)) mats = pathSet;
+      else if (x > 7 && x < 12 && z > -1 && z < 4) mats = farmSet;
+      else if (x < -11 && z > 9 && z < 15) mats = mudSet;
+      addBlock(cx, TERRAIN_BASE_Y, cz, TILE_SCALE, blockHeight, TILE_SCALE, mats);
     }
   }
 
@@ -434,8 +573,9 @@ function createHouse(x, z, roof = "thatch") {
   addBlock(-0.82, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   addBlock(0.8, 0.12, 1.24, 0.48, 0.7, 0.12, materialSet(materials.stone), house);
   const roofMat = roof === "red" ? materials.roof : materials.thatch;
-  addRamp(-0.72, 1.22, 0, 1.55, 1.05, 2.7, "east", roofMat, house);
-  addRamp(0.72, 1.22, 0, 1.55, 1.05, 2.7, "west", roofMat, house);
+  addRamp(-0.72, 1.22, 0, 1.55, 1.05, 2.7, "west", roofMat, house);
+  addRamp(0.72, 1.22, 0, 1.55, 1.05, 2.7, "east", roofMat, house);
+  addBlock(0, 2.18, 0, 0.2, 0.18, 2.72, materialSet(roofMat), house);
   return registerStructure(house, {
     type: "house",
     hp: 360,
@@ -669,13 +809,9 @@ function damageStructure(structure, amount) {
   if (structure.hp <= 0 && structure.alive) {
     structure.alive = false;
     game.spoils += structure.value;
-    structure.group.traverse((child) => {
-      if (child.isMesh && child.material?.color) {
-        child.material = child.material.clone();
-        child.material.color.lerp(new THREE.Color(0x251c1a), 0.68);
-      }
-    });
-    createSpawnBurst(structure.position, 0xd9654f);
+    const destroyedAt = structure.position.clone();
+    createSpawnBurst(destroyedAt, structure.type === "house" ? 0xb56d34 : 0xa7a59a);
+    structureGroup.remove(structure.group);
     if (structure.type === "base") {
       game.over = true;
       game.result = "Stronghold breached";
@@ -1044,6 +1180,7 @@ function updateWorldDrag(event) {
 
   if (pointerPan.rotate) {
     cameraState.yaw -= dx * 0.0065;
+    cameraState.pitch = clamp(cameraState.pitch + dy * 0.0055, MIN_CAMERA_PITCH, MAX_CAMERA_PITCH);
     updateCamera();
     return;
   }
@@ -1093,9 +1230,15 @@ function rotateCamera(amount) {
   updateCamera();
 }
 
+function pitchCamera(amount) {
+  cameraState.pitch = clamp(cameraState.pitch + amount, MIN_CAMERA_PITCH, MAX_CAMERA_PITCH);
+  updateCamera();
+}
+
 function resetCamera() {
   cameraState.target.set(0, 0, -2);
   cameraState.yaw = 0;
+  cameraState.pitch = 1.05;
   cameraState.zoom = 22;
   updateCamera();
 }
@@ -1156,6 +1299,8 @@ function bindInput() {
   window.addEventListener("keydown", (event) => {
     if (event.key.toLowerCase() === "q") rotateCamera(0.16);
     if (event.key.toLowerCase() === "e") rotateCamera(-0.16);
+    if (event.key.toLowerCase() === "r") pitchCamera(0.1);
+    if (event.key.toLowerCase() === "f") pitchCamera(-0.1);
     if (event.key === " ") {
       event.preventDefault();
       togglePause();

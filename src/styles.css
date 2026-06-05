@@ -218,6 +218,7 @@ button {
   width: min(620px, calc(100vw - 24px));
   padding: 10px;
   border-radius: 8px;
+  transform: translateX(-50%);
 }
 
 .card {
@@ -351,7 +352,7 @@ button {
   .top-hud {
     top: 10px;
     left: 10px;
-    width: calc(100vw - 86px);
+    width: min(304px, calc(100vw - 86px));
     transform: none;
   }
 
@@ -377,9 +378,11 @@ button {
 
   .deck {
     bottom: 10px;
-    width: calc(100vw - 20px);
+    left: 10px;
+    width: min(370px, calc(100vw - 20px));
     gap: 7px;
     padding: 8px;
+    transform: none;
   }
 
   .card {
