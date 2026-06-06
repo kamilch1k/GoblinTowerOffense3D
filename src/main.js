@@ -1104,6 +1104,7 @@ const unitStats = {
     range: 0.85,
     cooldown: 0.55,
     scale: [1.0, 1.1],
+    radius: 0.34,
     target: "mixed",
   },
   brute: {
@@ -1114,6 +1115,7 @@ const unitStats = {
     range: 1,
     cooldown: 0.9,
     scale: [1.35, 1.55],
+    radius: 0.48,
     target: "buildings",
   },
   torch: {
@@ -1124,6 +1126,7 @@ const unitStats = {
     range: 1.05,
     cooldown: 0.72,
     scale: [1.04, 1.15],
+    radius: 0.36,
     target: "buildings",
   },
   knight: {
@@ -1134,6 +1137,7 @@ const unitStats = {
     range: 0.9,
     cooldown: 0.72,
     scale: [1.08, 1.24],
+    radius: 0.38,
     target: "goblins",
   },
   villager: {
@@ -1144,6 +1148,7 @@ const unitStats = {
     range: 0,
     cooldown: 1,
     scale: [0.94, 1.02],
+    radius: 0.32,
     target: "none",
   },
 };
@@ -1180,6 +1185,7 @@ function spawnUnit(type, position, burst = true, level = 1) {
     speed: stats.speed * (stats.team === "goblin" ? 1 + (level - 1) * 0.035 : 1),
     damage: Math.round(stats.damage * levelScale),
     range: stats.range,
+    radius: stats.radius ?? stats.scale[0] * 0.36,
     cooldown: stats.cooldown,
     attackTimer: rand(0, stats.cooldown),
     sprite,
@@ -1248,12 +1254,20 @@ function nearestStructure(from, predicate = () => true) {
   return best;
 }
 
+function nearestHumanTarget(unit, maxDistance) {
+  return nearestUnit(
+    unit.position,
+    (other) => other.team === "defender" || other.team === "civilian",
+    maxDistance,
+  );
+}
+
 function damageUnit(unit, amount) {
   unit.hp -= amount;
   if (unit.hp <= 0) {
     unit.alive = false;
     unitGroup.remove(unit.sprite, unit.shadow);
-    if (unit.team === "defender") game.spoils += 1;
+    if (unit.team === "defender" || unit.team === "civilian") game.spoils += 1;
   }
 }
 
@@ -1286,38 +1300,123 @@ function goblinDrumMultiplier(unit, stat) {
   return boost;
 }
 
-function moveToward(unit, targetPosition, dt, stopDistance = 0) {
+function isBlockingObstacle(entity) {
+  return entity.alive && entity.type !== "spikes";
+}
+
+function forEachBlockingObstacle(targetEntity, callback) {
+  for (const structure of structures) {
+    if (structure !== targetEntity && isBlockingObstacle(structure)) callback(structure);
+  }
+  for (const building of goblinBuildings) {
+    if (building !== targetEntity && isBlockingObstacle(building)) callback(building);
+  }
+}
+
+function obstacleRadius(entity) {
+  return entity.radius ?? 1;
+}
+
+function steerAroundObstacles(unit, direction, targetEntity) {
+  const steering = direction.clone();
+  const unitRadius = unit.radius ?? 0.36;
+  const lookAhead = 1.8 + unit.speed * 0.72;
+
+  forEachBlockingObstacle(targetEntity, (obstacle) => {
+    const dx = obstacle.position.x - unit.position.x;
+    const dz = obstacle.position.z - unit.position.z;
+    const combined = obstacleRadius(obstacle) + unitRadius + 0.5;
+    const distSq = dx * dx + dz * dz;
+    const forward = dx * direction.x + dz * direction.z;
+    const lateralSigned = direction.x * dz - direction.z * dx;
+    const lateral = Math.abs(lateralSigned);
+
+    if (distSq < combined * combined) {
+      const dist = Math.max(0.001, Math.sqrt(distSq));
+      const force = (combined - dist) * 1.8 + 0.45;
+      steering.x -= (dx / dist) * force;
+      steering.z -= (dz / dist) * force;
+      return;
+    }
+
+    if (forward > -combined * 0.3 && forward < lookAhead && lateral < combined) {
+      const turnSign = lateralSigned >= 0 ? -1 : 1;
+      const force = (combined - lateral) * (1 - Math.max(0, forward) / lookAhead) * 1.45;
+      steering.x += -direction.z * turnSign * force;
+      steering.z += direction.x * turnSign * force;
+    }
+  });
+
+  if (steering.lengthSq() < 0.001) return direction;
+  return steering.normalize();
+}
+
+function separateFromObstacles(unit, targetEntity) {
+  const unitRadius = unit.radius ?? 0.36;
+  forEachBlockingObstacle(targetEntity, (obstacle) => {
+    const dx = unit.position.x - obstacle.position.x;
+    const dz = unit.position.z - obstacle.position.z;
+    const minDistance = obstacleRadius(obstacle) + unitRadius + 0.12;
+    const distSq = dx * dx + dz * dz;
+    if (distSq >= minDistance * minDistance) return;
+
+    let dist = Math.sqrt(distSq);
+    let nx = dx;
+    let nz = dz;
+    if (dist < 0.001) {
+      const fallback = unit.velocity.lengthSq() > 0.001 ? unit.velocity : tmpVec.set(rand(-1, 1), 0, rand(-1, 1));
+      nx = fallback.x;
+      nz = fallback.z;
+      dist = Math.max(0.001, Math.hypot(nx, nz));
+    }
+    const push = minDistance - dist + 0.02;
+    unit.position.x += (nx / dist) * push;
+    unit.position.z += (nz / dist) * push;
+  });
+  unit.position.x = clamp(unit.position.x, -HALF_MAP + 0.8, HALF_MAP - 0.8);
+  unit.position.z = clamp(unit.position.z, -HALF_MAP + 0.8, HALF_MAP - 0.8);
+}
+
+function moveToward(unit, targetPosition, dt, stopDistance = 0, targetEntity = null, speedMultiplier = 1) {
   tmpVec.copy(targetPosition).sub(unit.position);
   tmpVec.y = 0;
   const dist = tmpVec.length();
   if (dist <= stopDistance || dist < 0.001) {
     unit.velocity.multiplyScalar(0.8);
+    separateFromObstacles(unit, targetEntity);
     return dist;
   }
   tmpVec.normalize();
   const wiggle = Math.sin(game.time * 2.6 + unit.frameSeed) * 0.22;
-  const side = new THREE.Vector3(-tmpVec.z, 0, tmpVec.x).multiplyScalar(wiggle);
-  unit.velocity.copy(tmpVec.add(side).normalize()).multiplyScalar(unit.speed * goblinDrumMultiplier(unit, "speed"));
+  const direction = steerAroundObstacles(unit, tmpVec, targetEntity);
+  const side = new THREE.Vector3(-direction.z, 0, direction.x).multiplyScalar(wiggle);
+  unit.velocity
+    .copy(direction.add(side).normalize())
+    .multiplyScalar(unit.speed * speedMultiplier * goblinDrumMultiplier(unit, "speed"));
   unit.position.addScaledVector(unit.velocity, dt);
   unit.position.x = clamp(unit.position.x, -HALF_MAP + 0.8, HALF_MAP - 0.8);
   unit.position.z = clamp(unit.position.z, -HALF_MAP + 0.8, HALF_MAP - 0.8);
+  separateFromObstacles(unit, targetEntity);
   return dist;
 }
 
 function updateGoblin(unit, dt) {
-  const nearbyKnight = nearestUnit(unit.position, (other) => other.team === "defender", 5);
-  if (nearbyKnight && unit.type === "raider") {
-    unit.target = nearbyKnight;
+  const humanRange = unit.type === "raider" ? 11 : 5.5;
+  const nearbyHuman = nearestHumanTarget(unit, humanRange);
+  const structureTarget = nearestStructure(unit.position, (structure) =>
+    unit.type === "raider" ? true : structure.type !== "tower" || structure.hp < 220,
+  );
+
+  if (nearbyHuman && (unit.type === "raider" || !structureTarget || nearbyHuman.position.distanceToSquared(unit.position) < 10)) {
+    unit.target = nearbyHuman;
   } else {
-    unit.target = nearestStructure(unit.position, (structure) =>
-      unit.type === "raider" ? true : structure.type !== "tower" || structure.hp < 220,
-    );
+    unit.target = structureTarget ?? nearestHumanTarget(unit, 18);
   }
 
   if (!unit.target) return;
   const targetPos = unit.target.position;
   const radius = unit.target.radius ?? 0.55;
-  const dist = moveToward(unit, targetPos, dt, unit.range + radius);
+  const dist = moveToward(unit, targetPos, dt, unit.range + radius, unit.target);
   if (dist <= unit.range + radius + 0.08) {
     unit.attackTimer -= dt;
     if (unit.attackTimer <= 0) {
@@ -1343,7 +1442,7 @@ function updateKnight(unit, dt) {
     return;
   }
 
-  const dist = moveToward(unit, unit.target.position, dt, unit.range + 0.3);
+  const dist = moveToward(unit, unit.target.position, dt, unit.range + 0.3, unit.target);
   if (dist <= unit.range + 0.35) {
     unit.attackTimer -= dt;
     if (unit.attackTimer <= 0) {
@@ -1360,8 +1459,8 @@ function updateVillager(unit, dt) {
     tmpVec.copy(unit.position).sub(danger.position).setY(0);
     if (tmpVec.lengthSq() > 0.001) {
       tmpVec.normalize();
-      unit.velocity.copy(tmpVec).multiplyScalar(unit.speed * 1.7);
-      unit.position.addScaledVector(unit.velocity, dt);
+      const fleeTarget = tmpPoint.copy(unit.position).addScaledVector(tmpVec, 5);
+      moveToward(unit, fleeTarget, dt, 0, null, 1.7);
     }
   } else {
     if (unit.position.distanceTo(unit.wander) < 0.5 || Math.random() < 0.003) {
