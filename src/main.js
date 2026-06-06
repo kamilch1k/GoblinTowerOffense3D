@@ -34,7 +34,6 @@ const HALF_MAP = MAP_SIZE / 2;
 const TERRAIN_BASE_Y = -1.35;
 const TERRITORY_SIZE = 5;
 const TERRITORY_CHUNKS = MAP_SIZE / TERRITORY_SIZE;
-const STARTING_TERRITORY_DEPTH = 1;
 const SPAWN_DROP_TOLERANCE = 1.5;
 const SPAWN_EDGE_PADDING = 0.72;
 const MIN_CAMERA_PITCH = 0.28;
@@ -42,7 +41,7 @@ const MAX_CAMERA_PITCH = 1.4;
 const MAP_SEED = Math.random() * 10000;
 const LAKE_CENTER_X = -HALF_MAP + 13 + Math.sin(MAP_SEED * 0.23) * 4;
 const LAKE_CENTER_Z = HALF_MAP - 16 + Math.cos(MAP_SEED * 0.19) * 5;
-const MAX_ACTIVE_CARDS = 5;
+const MAX_ACTIVE_CARDS = 8;
 const VILLAGE_SITES = [
   { x: 0, z: -16, radius: 13, main: true },
   { x: -28, z: 16, radius: 8 },
@@ -106,6 +105,7 @@ world.add(terrainGroup, territoryGroup, structureGroup, unitGroup, effectGroup);
 
 const structures = [];
 const goblinBuildings = [];
+const movementBlockers = [];
 const units = [];
 const projectiles = [];
 const particles = [];
@@ -160,8 +160,8 @@ const cards = [
     spread: 1.15,
     level: 1,
     upgradeBaseCost: 6,
-    unlocked: false,
-    active: false,
+    unlocked: true,
+    active: true,
     unlockCost: 5,
   },
   {
@@ -174,8 +174,8 @@ const cards = [
     spread: 1.35,
     level: 1,
     upgradeBaseCost: 5,
-    unlocked: false,
-    active: false,
+    unlocked: true,
+    active: true,
     unlockCost: 4,
   },
   {
@@ -186,8 +186,8 @@ const cards = [
     cost: 4,
     level: 1,
     upgradeBaseCost: 7,
-    unlocked: false,
-    active: false,
+    unlocked: true,
+    active: true,
     unlockCost: 7,
   },
   {
@@ -198,8 +198,8 @@ const cards = [
     cost: 6,
     level: 1,
     upgradeBaseCost: 9,
-    unlocked: false,
-    active: false,
+    unlocked: true,
+    active: true,
     unlockCost: 10,
   },
   {
@@ -210,8 +210,8 @@ const cards = [
     cost: 3,
     level: 1,
     upgradeBaseCost: 6,
-    unlocked: false,
-    active: false,
+    unlocked: true,
+    active: true,
     unlockCost: 8,
   },
 ];
@@ -691,12 +691,7 @@ function isPointInUnlockedTerritory(point) {
 function initializeTerritory() {
   for (let cx = 0; cx < TERRITORY_CHUNKS; cx += 1) {
     for (let cz = 0; cz < TERRITORY_CHUNKS; cz += 1) {
-      const edge =
-        cx < STARTING_TERRITORY_DEPTH ||
-        cz < STARTING_TERRITORY_DEPTH ||
-        cx >= TERRITORY_CHUNKS - STARTING_TERRITORY_DEPTH ||
-        cz >= TERRITORY_CHUNKS - STARTING_TERRITORY_DEPTH;
-      if (edge) unlockedTerritory.add(territoryKey(cx, cz));
+      unlockedTerritory.add(territoryKey(cx, cz));
     }
   }
 }
@@ -718,6 +713,7 @@ function rebuildTerritoryOverlay() {
 }
 
 function territoryUnlockCost() {
+  if (unlockedTerritory.size >= TERRITORY_CHUNKS * TERRITORY_CHUNKS) return 0;
   return 2 + Math.floor(Math.max(0, unlockedTerritory.size - TERRITORY_CHUNKS * 4) / 18);
 }
 
@@ -814,8 +810,27 @@ function registerStructure(group, options) {
   return entity;
 }
 
-function addWallSegment(parent, x, z, w, d) {
+function addBlocker(owner, x, z, width, depth, options = {}) {
+  movementBlockers.push({
+    owner,
+    x,
+    z,
+    width,
+    depth,
+    pad: options.pad ?? 0.18,
+    targetSkip: options.targetSkip ?? false,
+  });
+}
+
+function removeOwnedBlockers(owner) {
+  for (let i = movementBlockers.length - 1; i >= 0; i -= 1) {
+    if (movementBlockers[i].owner === owner) movementBlockers.splice(i, 1);
+  }
+}
+
+function addWallSegment(parent, x, z, w, d, owner = null) {
   addBlock(x, 0.05, z, w, 1.7, d, materialSet(materials.castle, materials.stone), parent);
+  if (owner) addBlocker(owner, parent.position.x + x, parent.position.z + z, w, d, { pad: 0.34 });
   const count = Math.max(1, Math.floor(w > d ? w : d));
   for (let i = 0; i < count; i += 1) {
     const px = w > d ? x - w / 2 + 0.5 + i : x;
@@ -834,9 +849,6 @@ function createBase(x = 0, z = -16) {
   addBlock(-2.25, 0.05, 1.75, 1.1, 3.5, 1.1, materialSet(materials.castle), base);
   addBlock(2.25, 0.05, 1.75, 1.1, 3.5, 1.1, materialSet(materials.castle), base);
   addBlock(0, 3.42, 0, 4.6, 0.35, 0.55, materialSet(materials.banner, materials.trim), base);
-  addWallSegment(base, 0, 4.3, 7.6, 0.65);
-  addWallSegment(base, -4.1, 0.4, 0.65, 7.6);
-  addWallSegment(base, 4.1, 0.4, 0.65, 7.6);
   const entity = registerStructure(base, {
     type: "base",
     hp: 1800,
@@ -846,6 +858,10 @@ function createBase(x = 0, z = -16) {
     barWidth: 3,
     barY: 4.5,
   });
+  addBlocker(entity, x, z, 5.2, 4.7, { pad: 0.34, targetSkip: true });
+  addWallSegment(base, 0, 4.3, 7.6, 0.65, entity);
+  addWallSegment(base, -4.1, 0.4, 0.65, 7.6, entity);
+  addWallSegment(base, 4.1, 0.4, 0.65, 7.6, entity);
   baseStructure = entity;
 }
 
@@ -893,7 +909,7 @@ function createHouse(x, z, roof = "thatch") {
   const roofMat = roof === "red" ? materials.roof : materials.thatchRoof;
   const roofSideMat = roof === "red" ? materials.roofSide : materials.thatchRoofSide;
   addGableRoof(house, roofMat, roofSideMat);
-  return registerStructure(house, {
+  const entity = registerStructure(house, {
     type: "house",
     hp: 360,
     radius: 1.6,
@@ -901,6 +917,8 @@ function createHouse(x, z, roof = "thatch") {
     barWidth: 1.4,
     barY: 2.55,
   });
+  addBlocker(entity, x, z, 2.9, 2.5, { pad: 0.24, targetSkip: true });
+  return entity;
 }
 
 function createTower(x, z) {
@@ -914,7 +932,7 @@ function createTower(x, z) {
     addBlock(-0.72, 3.45, i * 0.72, 0.42, 0.52, 0.42, materialSet(materials.castle), tower);
     addBlock(0.72, 3.45, i * 0.72, 0.42, 0.52, 0.42, materialSet(materials.castle), tower);
   }
-  return registerStructure(tower, {
+  const entity = registerStructure(tower, {
     type: "tower",
     hp: 520,
     radius: 1.35,
@@ -925,6 +943,8 @@ function createTower(x, z) {
     barWidth: 1.5,
     barY: 4.3,
   });
+  addBlocker(entity, x, z, 2.2, 2.2, { pad: 0.26, targetSkip: true });
+  return entity;
 }
 
 function createVillageCluster(site) {
@@ -993,7 +1013,7 @@ function createGoblinDen(point, level) {
   addBlock(-0.5, 0.08, 0.72, 0.36, 0.5, 0.16, materialSet(materials.mud), den);
   addBlock(0.5, 0.08, 0.72, 0.36, 0.5, 0.16, materialSet(materials.mud), den);
   addGableRoof(den, materials.thatchRoof, materials.thatchRoofSide, { width: 2.0, depth: 1.75, height: 0.62, y: 0.82 });
-  return registerGoblinBuilding(den, {
+  const building = registerGoblinBuilding(den, {
     type: "den",
     level,
     hp: 220 + level * 45,
@@ -1001,6 +1021,8 @@ function createGoblinDen(point, level) {
     radius: 1.2,
     barY: 2.35,
   });
+  addBlocker(building, point.x, point.z, 1.8, 1.6, { pad: 0.24, targetSkip: true });
+  return building;
 }
 
 function createSpikeTrap(point, level) {
@@ -1012,7 +1034,7 @@ function createSpikeTrap(point, level) {
       addBlock(x, 0.12, z, 0.13, 0.45, 0.13, materialSet(materials.trim), trap);
     }
   }
-  return registerGoblinBuilding(trap, {
+  const building = registerGoblinBuilding(trap, {
     type: "spikes",
     level,
     hp: 120 + level * 25,
@@ -1021,6 +1043,7 @@ function createSpikeTrap(point, level) {
     range: 1.55,
     barY: 1.05,
   });
+  return building;
 }
 
 function createCatapult(point, level) {
@@ -1033,7 +1056,7 @@ function createCatapult(point, level) {
   addBlock(0.58, 0.22, -0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
   addBlock(0, 0.46, -0.18, 0.28, 1.2, 0.24, materialSet(materials.wood), catapult);
   addBlock(0, 1.3, 0.32, 0.22, 0.22, 1.55, materialSet(materials.trim), catapult);
-  return registerGoblinBuilding(catapult, {
+  const building = registerGoblinBuilding(catapult, {
     type: "catapult",
     level,
     hp: 260 + level * 50,
@@ -1042,6 +1065,8 @@ function createCatapult(point, level) {
     range: 15 + level * 0.9,
     barY: 2.1,
   });
+  addBlocker(building, point.x, point.z, 2.0, 1.55, { pad: 0.24, targetSkip: true });
+  return building;
 }
 
 function createWarDrum(point, level) {
@@ -1051,7 +1076,7 @@ function createWarDrum(point, level) {
   addBlock(-0.85, 0, 0, 0.18, 1.55, 0.18, materialSet(materials.trim), drum);
   addBlock(0.85, 0, 0, 0.18, 1.55, 0.18, materialSet(materials.trim), drum);
   addBlock(0, 1.42, 0, 1.9, 0.24, 0.18, materialSet(materials.banner), drum);
-  return registerGoblinBuilding(drum, {
+  const building = registerGoblinBuilding(drum, {
     type: "drum",
     level,
     hp: 190 + level * 38,
@@ -1060,6 +1085,8 @@ function createWarDrum(point, level) {
     range: 7 + level * 0.4,
     barY: 2.2,
   });
+  addBlocker(building, point.x, point.z, 1.45, 1.45, { pad: 0.24, targetSkip: true });
+  return building;
 }
 
 function placeBuilding(card, point) {
@@ -1276,6 +1303,7 @@ function damageStructure(structure, amount) {
   setHealthBar(structure);
   if (structure.hp <= 0 && structure.alive) {
     structure.alive = false;
+    removeOwnedBlockers(structure);
     game.spoils += structure.value;
     const destroyedAt = structure.position.clone();
     createSpawnBurst(destroyedAt, structure.type === "house" ? 0xb56d34 : 0xa7a59a);
@@ -1304,47 +1332,75 @@ function isBlockingObstacle(entity) {
   return entity.alive && entity.type !== "spikes";
 }
 
-function forEachBlockingObstacle(targetEntity, callback) {
-  for (const structure of structures) {
-    if (structure !== targetEntity && isBlockingObstacle(structure)) callback(structure);
-  }
-  for (const building of goblinBuildings) {
-    if (building !== targetEntity && isBlockingObstacle(building)) callback(building);
+function isLiveBlocker(blocker) {
+  return !blocker.owner || isBlockingObstacle(blocker.owner);
+}
+
+function forEachBlockingObstacle(callback) {
+  for (const blocker of movementBlockers) {
+    if (isLiveBlocker(blocker)) callback(blocker);
   }
 }
 
-function obstacleRadius(entity) {
-  return entity.radius ?? 1;
+function expandedBlockerBounds(blocker, unit) {
+  const pad = blocker.pad + (unit.radius ?? 0.36);
+  return {
+    left: blocker.x - blocker.width / 2 - pad,
+    right: blocker.x + blocker.width / 2 + pad,
+    top: blocker.z - blocker.depth / 2 - pad,
+    bottom: blocker.z + blocker.depth / 2 + pad,
+  };
+}
+
+function pointInsideBounds(x, z, bounds) {
+  return x >= bounds.left && x <= bounds.right && z >= bounds.top && z <= bounds.bottom;
+}
+
+function segmentIntersectsBounds(ax, az, bx, bz, bounds) {
+  const dx = bx - ax;
+  const dz = bz - az;
+  let tMin = 0;
+  let tMax = 1;
+  const axes = [
+    [ax, dx, bounds.left, bounds.right],
+    [az, dz, bounds.top, bounds.bottom],
+  ];
+
+  for (const [start, delta, min, max] of axes) {
+    if (Math.abs(delta) < 0.0001) {
+      if (start < min || start > max) return false;
+      continue;
+    }
+    const inv = 1 / delta;
+    let t1 = (min - start) * inv;
+    let t2 = (max - start) * inv;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return false;
+  }
+  return true;
 }
 
 function steerAroundObstacles(unit, direction, targetEntity) {
   const steering = direction.clone();
-  const unitRadius = unit.radius ?? 0.36;
   const lookAhead = 1.8 + unit.speed * 0.72;
+  const aheadX = unit.position.x + direction.x * lookAhead;
+  const aheadZ = unit.position.z + direction.z * lookAhead;
 
-  forEachBlockingObstacle(targetEntity, (obstacle) => {
-    const dx = obstacle.position.x - unit.position.x;
-    const dz = obstacle.position.z - unit.position.z;
-    const combined = obstacleRadius(obstacle) + unitRadius + 0.5;
-    const distSq = dx * dx + dz * dz;
-    const forward = dx * direction.x + dz * direction.z;
-    const lateralSigned = direction.x * dz - direction.z * dx;
-    const lateral = Math.abs(lateralSigned);
+  forEachBlockingObstacle((blocker) => {
+    if (blocker.owner === targetEntity && blocker.targetSkip) return;
+    const bounds = expandedBlockerBounds(blocker, unit);
+    if (!segmentIntersectsBounds(unit.position.x, unit.position.z, aheadX, aheadZ, bounds)) return;
 
-    if (distSq < combined * combined) {
-      const dist = Math.max(0.001, Math.sqrt(distSq));
-      const force = (combined - dist) * 1.8 + 0.45;
-      steering.x -= (dx / dist) * force;
-      steering.z -= (dz / dist) * force;
-      return;
-    }
-
-    if (forward > -combined * 0.3 && forward < lookAhead && lateral < combined) {
-      const turnSign = lateralSigned >= 0 ? -1 : 1;
-      const force = (combined - lateral) * (1 - Math.max(0, forward) / lookAhead) * 1.45;
-      steering.x += -direction.z * turnSign * force;
-      steering.z += direction.x * turnSign * force;
-    }
+    const centerDx = blocker.x - unit.position.x;
+    const centerDz = blocker.z - unit.position.z;
+    const lateralSigned = direction.x * centerDz - direction.z * centerDx;
+    const turnSign = lateralSigned >= 0 ? -1 : 1;
+    const forward = Math.max(0, centerDx * direction.x + centerDz * direction.z);
+    const force = Math.max(0.35, 1 - forward / Math.max(lookAhead, 0.001)) * 1.55;
+    steering.x += -direction.z * turnSign * force;
+    steering.z += direction.x * turnSign * force;
   });
 
   if (steering.lengthSq() < 0.001) return direction;
@@ -1352,26 +1408,20 @@ function steerAroundObstacles(unit, direction, targetEntity) {
 }
 
 function separateFromObstacles(unit, targetEntity) {
-  const unitRadius = unit.radius ?? 0.36;
-  forEachBlockingObstacle(targetEntity, (obstacle) => {
-    const dx = unit.position.x - obstacle.position.x;
-    const dz = unit.position.z - obstacle.position.z;
-    const minDistance = obstacleRadius(obstacle) + unitRadius + 0.12;
-    const distSq = dx * dx + dz * dz;
-    if (distSq >= minDistance * minDistance) return;
+  forEachBlockingObstacle((blocker) => {
+    const bounds = expandedBlockerBounds(blocker, unit);
+    if (!pointInsideBounds(unit.position.x, unit.position.z, bounds)) return;
 
-    let dist = Math.sqrt(distSq);
-    let nx = dx;
-    let nz = dz;
-    if (dist < 0.001) {
-      const fallback = unit.velocity.lengthSq() > 0.001 ? unit.velocity : tmpVec.set(rand(-1, 1), 0, rand(-1, 1));
-      nx = fallback.x;
-      nz = fallback.z;
-      dist = Math.max(0.001, Math.hypot(nx, nz));
-    }
-    const push = minDistance - dist + 0.02;
-    unit.position.x += (nx / dist) * push;
-    unit.position.z += (nz / dist) * push;
+    const pushLeft = Math.abs(unit.position.x - bounds.left);
+    const pushRight = Math.abs(bounds.right - unit.position.x);
+    const pushTop = Math.abs(unit.position.z - bounds.top);
+    const pushBottom = Math.abs(bounds.bottom - unit.position.z);
+    const minPush = Math.min(pushLeft, pushRight, pushTop, pushBottom);
+
+    if (minPush === pushLeft) unit.position.x = bounds.left - 0.02;
+    else if (minPush === pushRight) unit.position.x = bounds.right + 0.02;
+    else if (minPush === pushTop) unit.position.z = bounds.top - 0.02;
+    else unit.position.z = bounds.bottom + 0.02;
   });
   unit.position.x = clamp(unit.position.x, -HALF_MAP + 0.8, HALF_MAP - 0.8);
   unit.position.z = clamp(unit.position.z, -HALF_MAP + 0.8, HALF_MAP - 0.8);
@@ -1769,7 +1819,10 @@ function toggleCardActive(card) {
 
 function buildDeck() {
   deckEl.innerHTML = "";
-  for (const card of cards) {
+  const visibleCards = cards.filter(
+    (card) => card.type !== "territory" || unlockedTerritory.size < TERRITORY_CHUNKS * TERRITORY_CHUNKS,
+  );
+  for (const card of visibleCards) {
     const button = document.createElement("div");
     const cost = cardUpgradeCost(card);
     button.className = "card";

@@ -239,12 +239,11 @@ button {
 }
 
 .card.disabled {
-  filter: grayscale(0.55) brightness(0.72);
   cursor: default;
 }
 
 .card.locked {
-  filter: grayscale(0.75) brightness(0.58);
+  opacity: 0.72;
 }
 
 .card.benched {
@@ -260,8 +259,9 @@ button {
   inset: 0;
   z-index: -2;
   background-image: var(--card-art);
+  background-position: center;
   background-repeat: no-repeat;
-  background-size: cover;
+  background-size: 100% 100%;
   image-rendering: pixelated;
   content: "";
 }
@@ -270,8 +270,14 @@ button {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(180deg, rgba(5, 10, 12, 0.08), rgba(5, 10, 12, 0.74));
+  background: linear-gradient(180deg, rgba(5, 10, 12, 0.02), rgba(5, 10, 12, 0.52));
   content: "";
+}
+
+.card.disabled::after {
+  background:
+    linear-gradient(180deg, rgba(5, 10, 12, 0.1), rgba(5, 10, 12, 0.66)),
+    rgba(18, 18, 18, 0.18);
 }
 
 .card-title {
@@ -377,8 +383,9 @@ button {
   position: absolute;
   inset: 0;
   background-image: var(--card-art);
+  background-position: center;
   background-repeat: no-repeat;
-  background-size: cover;
+  background-size: 100% 100%;
   image-rendering: pixelated;
   content: "";
 }
