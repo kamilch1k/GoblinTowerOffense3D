@@ -1029,6 +1029,8 @@ function registerGoblinBuilding(group, options) {
     damage: options.damage ?? 0,
     target: null,
     velocity: new THREE.Vector3(),
+    frameSeed: Math.random() * 10,
+    slowUntil: 0,
     healthBar: healthBar(options.barWidth ?? 1.2),
   };
   building.healthBar.position.set(0, options.barY ?? 1.6, 0);
@@ -1526,7 +1528,7 @@ function moveToward(unit, targetPosition, dt, stopDistance = 0, targetEntity = n
     return dist;
   }
   tmpVec.normalize();
-  const wiggle = Math.sin(game.time * 2.6 + unit.frameSeed) * 0.22;
+  const wiggle = Math.sin(game.time * 2.6 + (unit.frameSeed ?? 0)) * 0.22;
   const direction = steerAroundObstacles(unit, tmpVec, targetEntity);
   const side = new THREE.Vector3(-direction.z, 0, direction.x).multiplyScalar(wiggle);
   unit.velocity
