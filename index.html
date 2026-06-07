@@ -74,6 +74,44 @@
       <main id="battleMessage" class="battle-message" aria-live="polite"></main>
 
       <section id="deck" class="deck" aria-label="Troop cards"></section>
+
+      <section id="mainMenu" class="menu-screen main-menu" aria-label="Main menu">
+        <div class="menu-panel">
+          <p class="menu-kicker">Goblin command table</p>
+          <h1>Goblin Tower Offense 3D</h1>
+          <div class="menu-actions">
+            <button id="startRaid" class="menu-button primary" type="button">Start Raid</button>
+          </div>
+          <div class="stats-grid" aria-label="Raid stats">
+            <div><span>Best Time</span><strong id="menuBestTime">00:00</strong></div>
+            <div><span>Best Spoils</span><strong id="menuBestSpoils">0</strong></div>
+            <div><span>Best Damage</span><strong id="menuBestDamage">0</strong></div>
+            <div><span>Raids</span><strong id="menuRaids">0</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="pauseMenu" class="menu-screen pause-menu hidden" aria-label="Pause menu">
+        <div class="menu-panel">
+          <p class="menu-kicker">Raid paused</p>
+          <h2>Battle Orders</h2>
+          <div class="menu-actions">
+            <button id="resumeRaid" class="menu-button primary" type="button">Resume</button>
+            <button id="restartRaid" class="menu-button" type="button">Restart</button>
+            <button id="exitToMenu" class="menu-button danger" type="button">Main Menu</button>
+          </div>
+          <div class="stats-grid live" aria-label="Current raid stats">
+            <div><span>Time</span><strong id="statTime">00:00</strong></div>
+            <div><span>Spoils</span><strong id="statSpoils">0</strong></div>
+            <div><span>Damage</span><strong id="statDamage">0</strong></div>
+            <div><span>Structures</span><strong id="statStructures">0</strong></div>
+            <div><span>Defeated</span><strong id="statDefeated">0</strong></div>
+            <div><span>Lost</span><strong id="statLost">0</strong></div>
+            <div><span>Spawned</span><strong id="statSpawned">0</strong></div>
+            <div><span>Buildings</span><strong id="statBuildings">0</strong></div>
+          </div>
+        </div>
+      </section>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

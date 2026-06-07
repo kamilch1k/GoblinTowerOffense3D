@@ -27,6 +27,10 @@ button {
   font: inherit;
 }
 
+body.menu-open #world {
+  cursor: default;
+}
+
 #world {
   display: block;
   width: 100%;
@@ -205,6 +209,125 @@ button {
 
 .battle-message.show {
   display: block;
+}
+
+.menu-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(90deg, rgba(9, 14, 16, 0.9), rgba(9, 14, 16, 0.52));
+}
+
+.menu-screen.hidden {
+  display: none;
+}
+
+.menu-panel {
+  width: min(520px, 100%);
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid rgba(244, 239, 225, 0.2);
+  border-radius: 8px;
+  background: rgba(17, 23, 25, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+}
+
+.menu-kicker {
+  margin: 0 0 8px;
+  color: #dfc86e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.menu-panel h1,
+.menu-panel h2 {
+  margin: 0;
+  color: #fff5d7;
+  font-size: clamp(2rem, 6vw, 4rem);
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+
+.menu-panel h2 {
+  font-size: clamp(1.65rem, 4.4vw, 2.8rem);
+}
+
+.menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.menu-button {
+  min-width: 112px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 246, 215, 0.28);
+  border-radius: 6px;
+  background: #263a3a;
+  color: #fff8e3;
+  cursor: pointer;
+  font-weight: 950;
+}
+
+.menu-button.primary {
+  background: #567b36;
+}
+
+.menu-button.danger {
+  background: #7a3230;
+}
+
+.menu-button:hover {
+  filter: brightness(1.12);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.stats-grid.live {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats-grid div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(244, 239, 225, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.stats-grid span {
+  display: block;
+  overflow: hidden;
+  color: #bdaf91;
+  font-size: 0.66rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stats-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #ffffff;
+  font-size: 1.08rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 950;
+  line-height: 1;
 }
 
 .deck {
@@ -436,5 +559,19 @@ button {
   .cost {
     width: 28px;
     height: 28px;
+  }
+
+  .menu-screen {
+    padding: 16px;
+    place-items: end center;
+  }
+
+  .menu-panel {
+    padding: 18px;
+  }
+
+  .stats-grid,
+  .stats-grid.live {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

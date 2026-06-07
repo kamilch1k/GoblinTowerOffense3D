@@ -28,6 +28,24 @@ const spoilsReadout = document.querySelector("#spoilsReadout");
 const territoryReadout = document.querySelector("#territoryReadout");
 const battleMessage = document.querySelector("#battleMessage");
 const pauseToggle = document.querySelector("#pauseToggle");
+const mainMenu = document.querySelector("#mainMenu");
+const pauseMenu = document.querySelector("#pauseMenu");
+const startRaidButton = document.querySelector("#startRaid");
+const resumeRaidButton = document.querySelector("#resumeRaid");
+const restartRaidButton = document.querySelector("#restartRaid");
+const exitToMenuButton = document.querySelector("#exitToMenu");
+const statTime = document.querySelector("#statTime");
+const statSpoils = document.querySelector("#statSpoils");
+const statDamage = document.querySelector("#statDamage");
+const statStructures = document.querySelector("#statStructures");
+const statDefeated = document.querySelector("#statDefeated");
+const statLost = document.querySelector("#statLost");
+const statSpawned = document.querySelector("#statSpawned");
+const statBuildings = document.querySelector("#statBuildings");
+const menuBestTime = document.querySelector("#menuBestTime");
+const menuBestSpoils = document.querySelector("#menuBestSpoils");
+const menuBestDamage = document.querySelector("#menuBestDamage");
+const menuRaids = document.querySelector("#menuRaids");
 
 const MAP_SIZE = 100;
 const HALF_MAP = MAP_SIZE / 2;
@@ -51,6 +69,8 @@ const VILLAGE_SITES = [
 ];
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const formatTime = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+const saveKey = "goblinTowerOffenseStats";
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10181b);
@@ -88,10 +108,21 @@ const game = {
   rage: 6,
   maxRage: 10,
   spoils: 0,
-  paused: false,
+  started: false,
+  paused: true,
   over: false,
   result: "",
   defenderPulse: 0,
+  statsRecorded: false,
+  stats: {
+    spawned: 0,
+    buildingsPlaced: 0,
+    structuresDestroyed: 0,
+    defeated: 0,
+    lost: 0,
+    damageDealt: 0,
+    damageTaken: 0,
+  },
 };
 
 const world = new THREE.Group();
@@ -1144,6 +1175,7 @@ function placeBuilding(card, point) {
   if (card.buildingType === "spikes") createSpikeTrap(p, card.level);
   if (card.buildingType === "catapult") createCatapult(p, card.level);
   if (card.buildingType === "drum") createWarDrum(p, card.level);
+  game.stats.buildingsPlaced += 1;
   createSpawnBurst(p, 0x83c16b);
 }
 
@@ -1278,6 +1310,7 @@ function spawnUnit(type, position, burst = true, level = 1) {
   syncUnitToTerrain(unit);
   units.push(unit);
   unitGroup.add(shadow, sprite);
+  if (unit.team === "goblin") game.stats.spawned += 1;
   if (burst) createSpawnBurst(position, type === "brute" ? 0xb95632 : 0x9ec96d);
   return unit;
 }
@@ -1360,16 +1393,25 @@ function nearestHumanTarget(unit, maxDistance) {
   );
 }
 
-function damageUnit(unit, amount) {
+function damageUnit(unit, amount, sourceTeam = null) {
+  const applied = Math.min(unit.hp, amount);
+  if (sourceTeam === "goblin" && (unit.team === "defender" || unit.team === "civilian")) game.stats.damageDealt += Math.round(applied);
+  if (sourceTeam === "defender" && unit.team === "goblin") game.stats.damageTaken += Math.round(applied);
   unit.hp -= amount;
   if (unit.hp <= 0) {
     unit.alive = false;
     unitGroup.remove(unit.sprite, unit.shadow);
-    if (unit.team === "defender" || unit.team === "civilian") game.spoils += 1;
+    if (unit.team === "defender" || unit.team === "civilian") {
+      game.spoils += 1;
+      game.stats.defeated += 1;
+    }
+    if (unit.team === "goblin") game.stats.lost += 1;
   }
 }
 
-function damageGoblinBuilding(building, amount) {
+function damageGoblinBuilding(building, amount, sourceTeam = null) {
+  const applied = Math.min(building.hp, amount);
+  if (sourceTeam === "defender") game.stats.damageTaken += Math.round(applied);
   building.hp -= amount;
   setHealthBar(building);
   if (building.hp <= 0 && building.alive) {
@@ -1380,18 +1422,21 @@ function damageGoblinBuilding(building, amount) {
   }
 }
 
-function damageCombatTarget(target, amount) {
-  if (target.sprite) damageUnit(target, amount);
-  else if (goblinBuildings.includes(target)) damageGoblinBuilding(target, amount);
-  else damageStructure(target, amount);
+function damageCombatTarget(target, amount, sourceTeam = null) {
+  if (target.sprite) damageUnit(target, amount, sourceTeam);
+  else if (goblinBuildings.includes(target)) damageGoblinBuilding(target, amount, sourceTeam);
+  else damageStructure(target, amount, sourceTeam);
 }
 
-function damageStructure(structure, amount) {
+function damageStructure(structure, amount, sourceTeam = null) {
+  const applied = Math.min(structure.hp, amount);
+  if (sourceTeam === "goblin") game.stats.damageDealt += Math.round(applied);
   structure.hp -= amount;
   setHealthBar(structure);
   if (structure.hp <= 0 && structure.alive) {
     structure.alive = false;
     removeOwnedBlockers(structure);
+    game.stats.structuresDestroyed += 1;
     game.spoils += structure.value;
     const destroyedAt = structure.position.clone();
     createSpawnBurst(destroyedAt, structure.type === "house" ? 0xb56d34 : 0xa7a59a);
@@ -1399,6 +1444,7 @@ function damageStructure(structure, amount) {
     if (structure.type === "base") {
       game.over = true;
       game.result = "Stronghold breached";
+      recordRaidStats();
       battleMessage.textContent = game.result;
       battleMessage.classList.add("show");
     }
@@ -1563,8 +1609,8 @@ function updateGoblin(unit, dt) {
     if (unit.attackTimer <= 0) {
       unit.attackTimer = unit.cooldown;
       const damage = unit.damage * goblinDrumMultiplier(unit, "damage");
-      if (unit.target.sprite) damageUnit(unit.target, damage);
-      else damageStructure(unit.target, damage * (unit.type === "torch" ? 1.35 : 1));
+      if (unit.target.sprite) damageUnit(unit.target, damage, "goblin");
+      else damageStructure(unit.target, damage * (unit.type === "torch" ? 1.35 : 1), "goblin");
       createHitParticle(targetPos, unit.type === "torch" ? 0xf0a443 : 0xbfd07a);
     }
   }
@@ -1588,7 +1634,7 @@ function updateKnight(unit, dt) {
     unit.attackTimer -= dt;
     if (unit.attackTimer <= 0) {
       unit.attackTimer = unit.cooldown;
-      damageCombatTarget(unit.target, unit.damage);
+      damageCombatTarget(unit.target, unit.damage, "defender");
       createHitParticle(unit.target.position, 0xbcd5e6);
     }
   }
@@ -1638,6 +1684,7 @@ function shootTower(tower, target) {
     target,
     speed: 12,
     damage: tower.attackDamage,
+    sourceTeam: "defender",
     alive: true,
   });
   effectGroup.add(mesh);
@@ -1654,6 +1701,7 @@ function shootCatapult(catapult, target) {
     target,
     speed: 8.8,
     damage: catapult.damage,
+    sourceTeam: "goblin",
     alive: true,
   });
   effectGroup.add(mesh);
@@ -1683,7 +1731,7 @@ function updateProjectiles(dt) {
     const dist = tmpVec.length();
     if (dist < 0.25) {
       projectile.alive = false;
-      damageCombatTarget(projectile.target, projectile.damage);
+      damageCombatTarget(projectile.target, projectile.damage, projectile.sourceTeam);
       createHitParticle(projectile.target.position, 0xf5d27d);
       effectGroup.remove(projectile.mesh);
       continue;
@@ -1817,7 +1865,7 @@ function updateGoblinBuildings(dt) {
         building.reload = building.cooldown;
         for (const target of targets) {
           target.slowUntil = Math.max(target.slowUntil ?? 0, game.time + 1.05);
-          damageUnit(target, 34 + building.level * 12);
+          damageUnit(target, 34 + building.level * 12, "goblin");
           createHitParticle(target.position, 0xddd0a8);
         }
       } else {
@@ -2009,7 +2057,7 @@ spawnPreview.visible = false;
 scene.add(spawnPreview);
 
 function beginCardDrag(event, card) {
-  if (game.over || game.paused || !card.unlocked || !card.active || game.rage < cardManaCost(card)) return;
+  if (!game.started || game.over || game.paused || !card.unlocked || !card.active || game.rage < cardManaCost(card)) return;
   event.preventDefault();
   const ghost = document.createElement("div");
   ghost.className = "drag-ghost";
@@ -2109,10 +2157,118 @@ function pointerToGround(clientX, clientY) {
   return hit ? tmpPoint.clone() : null;
 }
 
+function loadBestStats() {
+  try {
+    return JSON.parse(localStorage.getItem(saveKey)) ?? { raids: 0, bestTime: 0, bestSpoils: 0, bestDamage: 0 };
+  } catch {
+    return { raids: 0, bestTime: 0, bestSpoils: 0, bestDamage: 0 };
+  }
+}
+
+function saveBestStats(stats) {
+  localStorage.setItem(saveKey, JSON.stringify(stats));
+}
+
+function recordRaidStats() {
+  if (game.statsRecorded || game.time <= 0) return;
+  const best = loadBestStats();
+  best.raids += 1;
+  best.bestTime = Math.max(best.bestTime, Math.floor(game.time));
+  best.bestSpoils = Math.max(best.bestSpoils, game.spoils);
+  best.bestDamage = Math.max(best.bestDamage, game.stats.damageDealt);
+  saveBestStats(best);
+  game.statsRecorded = true;
+}
+
+function updateStatsPanels() {
+  statTime.textContent = formatTime(game.time);
+  statSpoils.textContent = game.spoils;
+  statDamage.textContent = game.stats.damageDealt;
+  statStructures.textContent = game.stats.structuresDestroyed;
+  statDefeated.textContent = game.stats.defeated;
+  statLost.textContent = game.stats.lost;
+  statSpawned.textContent = game.stats.spawned;
+  statBuildings.textContent = game.stats.buildingsPlaced;
+
+  const best = loadBestStats();
+  menuBestTime.textContent = formatTime(best.bestTime ?? 0);
+  menuBestSpoils.textContent = best.bestSpoils ?? 0;
+  menuBestDamage.textContent = best.bestDamage ?? 0;
+  menuRaids.textContent = best.raids ?? 0;
+}
+
+function setMenuOpen(open) {
+  document.body.classList.toggle("menu-open", open);
+}
+
+function setPauseButton(paused) {
+  pauseToggle.innerHTML = paused ? '<i data-lucide="play"></i>' : '<i data-lucide="pause"></i>';
+  pauseToggle.setAttribute("aria-label", paused ? "Resume" : "Pause");
+  pauseToggle.setAttribute("title", paused ? "Resume" : "Pause");
+  createIcons({ icons: { Play, Pause } });
+}
+
+function closeMenus() {
+  mainMenu.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  setMenuOpen(false);
+}
+
+function startRaid() {
+  if (game.time > 0 || game.statsRecorded) {
+    window.location.reload();
+    return;
+  }
+  game.started = true;
+  game.paused = false;
+  battleMessage.classList.remove("show");
+  closeMenus();
+  setPauseButton(false);
+}
+
+function showMainMenu() {
+  game.started = false;
+  game.paused = true;
+  if (dragState) endCardDrag();
+  pauseMenu.classList.add("hidden");
+  mainMenu.classList.remove("hidden");
+  startRaidButton.textContent = game.time > 0 ? "Start New Raid" : "Start Raid";
+  setMenuOpen(true);
+  setPauseButton(true);
+  updateStatsPanels();
+}
+
+function showPauseMenu() {
+  if (!game.started || game.over) return;
+  game.paused = true;
+  pauseMenu.classList.remove("hidden");
+  mainMenu.classList.add("hidden");
+  setMenuOpen(true);
+  setPauseButton(true);
+  updateStatsPanels();
+}
+
+function resumeRaid() {
+  if (!game.started || game.over) return;
+  game.paused = false;
+  closeMenus();
+  setPauseButton(false);
+}
+
+function restartRaid() {
+  recordRaidStats();
+  window.location.reload();
+}
+
+function exitToMainMenu() {
+  recordRaidStats();
+  showMainMenu();
+}
+
 let pointerPan = null;
 
 function beginWorldDrag(event) {
-  if (event.target !== canvas || dragState) return;
+  if (event.target !== canvas || dragState || document.body.classList.contains("menu-open")) return;
   pointerPan = {
     x: event.clientX,
     y: event.clientY,
@@ -2201,8 +2357,7 @@ function updateHud() {
   baseMeter.style.width = `${basePct * 100}%`;
   rageReadout.textContent = `${Math.floor(game.rage)} / ${game.maxRage}`;
   rageMeter.style.width = `${(game.rage / game.maxRage) * 100}%`;
-  const totalSeconds = Math.floor(game.time);
-  raidReadout.textContent = `${String(Math.floor(totalSeconds / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
+  raidReadout.textContent = formatTime(game.time);
   hordeReadout.textContent = units.filter((unit) => unit.team === "goblin").length;
   defenderReadout.textContent = units.filter((unit) => unit.team === "defender").length;
   structureReadout.textContent = structures.filter((structure) => structure.alive).length;
@@ -2224,17 +2379,17 @@ function updateHud() {
     deckButton.textContent = card.unlocked ? (card.active ? "Bench" : "Add") : `Unlock ${card.unlockCost}`;
     deckButton.disabled = game.over || (!card.unlocked && game.spoils < card.unlockCost) || (card.unlocked && !card.active && activeCardCount() >= MAX_ACTIVE_CARDS);
   }
+  updateStatsPanels();
 }
 
 function togglePause() {
   if (game.over) return;
-  game.paused = !game.paused;
-  pauseToggle.innerHTML = game.paused ? '<i data-lucide="play"></i>' : '<i data-lucide="pause"></i>';
-  pauseToggle.setAttribute("aria-label", game.paused ? "Resume" : "Pause");
-  pauseToggle.setAttribute("title", game.paused ? "Resume" : "Pause");
-  createIcons({ icons: { Play, Pause } });
-  battleMessage.textContent = game.paused ? "Paused" : "";
-  battleMessage.classList.toggle("show", game.paused);
+  if (!game.started) {
+    startRaid();
+    return;
+  }
+  if (game.paused) resumeRaid();
+  else showPauseMenu();
 }
 
 function bindInput() {
@@ -2260,6 +2415,10 @@ function bindInput() {
   document.querySelector("#zoomIn").addEventListener("click", () => zoomCamera(0.82));
   document.querySelector("#zoomOut").addEventListener("click", () => zoomCamera(1.18));
   pauseToggle.addEventListener("click", togglePause);
+  startRaidButton.addEventListener("click", startRaid);
+  resumeRaidButton.addEventListener("click", resumeRaid);
+  restartRaidButton.addEventListener("click", restartRaid);
+  exitToMenuButton.addEventListener("click", exitToMainMenu);
 
   window.addEventListener("keydown", (event) => {
     if (event.key.toLowerCase() === "q") rotateCamera(0.16);
@@ -2272,13 +2431,14 @@ function bindInput() {
       event.preventDefault();
       togglePause();
     }
+    if (event.key === "Escape") togglePause();
   });
 }
 
 function animate() {
   requestAnimationFrame(animate);
   let dt = Math.min(clock.getDelta(), 0.05);
-  if (game.paused || game.over) dt = 0;
+  if (!game.started || game.paused || game.over) dt = 0;
   if (dt > 0) {
     game.time += dt;
     game.rage = clamp(game.rage + dt * 0.62, 0, game.maxRage);
@@ -2291,6 +2451,7 @@ function animate() {
     if (baseStructure?.alive && game.time > 220 && units.filter((unit) => unit.team === "goblin").length === 0) {
       game.over = true;
       game.result = "Raid repelled";
+      recordRaidStats();
       battleMessage.textContent = game.result;
       battleMessage.classList.add("show");
     }
@@ -2306,6 +2467,7 @@ function boot() {
   buildDeck();
   bindInput();
   resize();
+  showMainMenu();
   updateHud();
   animate();
 }
