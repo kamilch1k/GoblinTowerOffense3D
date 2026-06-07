@@ -408,6 +408,8 @@ const materials = {
 const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
 const circleGeometry = new THREE.CircleGeometry(1, 28);
 circleGeometry.rotateX(-Math.PI / 2);
+const wheelGeometry = new THREE.CylinderGeometry(0.28, 0.28, 0.26, 10);
+wheelGeometry.rotateZ(Math.PI / 2);
 const hpBackGeometry = new THREE.BoxGeometry(1, 0.08, 0.08);
 const hpFillGeometry = new THREE.BoxGeometry(1, 0.09, 0.1);
 
@@ -696,20 +698,35 @@ function initializeTerritory() {
   }
 }
 
-function rebuildTerritoryOverlay() {
+function rebuildTerritoryOverlay(activeChunk = null) {
   territoryGroup.clear();
   const geometry = new THREE.PlaneGeometry(TERRITORY_SIZE - 0.16, TERRITORY_SIZE - 0.16);
   geometry.rotateX(-Math.PI / 2);
   const edgeGeometry = new THREE.EdgesGeometry(geometry);
-  for (const key of unlockedTerritory) {
-    const [cx, cz] = parseTerritoryKey(key);
-    const center = territoryCenter(cx, cz);
-    const mesh = new THREE.Mesh(geometry, materials.territory);
-    mesh.position.set(center.x, sampleTerrainHeight(center.x, center.z) + 0.18, center.z);
-    const edge = new THREE.LineSegments(edgeGeometry, materials.territoryEdge);
-    edge.position.copy(mesh.position);
-    territoryGroup.add(mesh, edge);
+  for (let cx = 0; cx < TERRITORY_CHUNKS; cx += 1) {
+    for (let cz = 0; cz < TERRITORY_CHUNKS; cz += 1) {
+      const unlocked = isChunkUnlocked(cx, cz);
+      const unlockable = isChunkUnlockable(cx, cz);
+      const active = activeChunk?.cx === cx && activeChunk?.cz === cz;
+      if (!unlocked && !unlockable && !active) continue;
+      const center = territoryCenter(cx, cz);
+      const mesh = new THREE.Mesh(geometry, materials.territory);
+      mesh.position.set(center.x, sampleTerrainHeight(center.x, center.z) + 0.18, center.z);
+      const edge = new THREE.LineSegments(edgeGeometry, materials.territoryEdge);
+      edge.position.copy(mesh.position);
+      mesh.material = active ? materials.territoryPreview : materials.territory;
+      territoryGroup.add(mesh, edge);
+    }
   }
+}
+
+function hideTerritoryOverlay() {
+  territoryGroup.clear();
+}
+
+function updateTerritoryPlacementOverlay(point) {
+  const chunk = territoryChunkFromPoint(point);
+  rebuildTerritoryOverlay(chunk);
 }
 
 function territoryUnlockCost() {
@@ -724,7 +741,7 @@ function unlockTerritoryAt(point) {
   if (game.rage < cost) return false;
   game.rage = clamp(game.rage - cost, 0, game.maxRage);
   unlockedTerritory.add(chunk.key);
-  rebuildTerritoryOverlay();
+  updateTerritoryPlacementOverlay(point);
   createSpawnBurst(territoryCenter(chunk.cx, chunk.cz), 0xe4c153);
   return true;
 }
@@ -759,7 +776,7 @@ function createTerrain() {
   terrainGroup.add(skirt);
 
   initializeTerritory();
-  rebuildTerritoryOverlay();
+  hideTerritoryOverlay();
 }
 
 function healthBar(width = 1.8) {
@@ -811,7 +828,7 @@ function registerStructure(group, options) {
 }
 
 function addBlocker(owner, x, z, width, depth, options = {}) {
-  movementBlockers.push({
+  const blocker = {
     owner,
     x,
     z,
@@ -819,12 +836,22 @@ function addBlocker(owner, x, z, width, depth, options = {}) {
     depth,
     pad: options.pad ?? 0.18,
     targetSkip: options.targetSkip ?? false,
-  });
+  };
+  movementBlockers.push(blocker);
+  return blocker;
 }
 
 function removeOwnedBlockers(owner) {
   for (let i = movementBlockers.length - 1; i >= 0; i -= 1) {
     if (movementBlockers[i].owner === owner) movementBlockers.splice(i, 1);
+  }
+}
+
+function syncOwnedBlockers(owner) {
+  for (const blocker of movementBlockers) {
+    if (blocker.owner !== owner) continue;
+    blocker.x = owner.position.x;
+    blocker.z = owner.position.z;
   }
 }
 
@@ -986,6 +1013,7 @@ function registerGoblinBuilding(group, options) {
   const building = {
     id: crypto.randomUUID(),
     type: options.type,
+    team: "goblin",
     group,
     position: group.position,
     level: options.level ?? 1,
@@ -997,6 +1025,10 @@ function registerGoblinBuilding(group, options) {
     reload: rand(0, options.cooldown ?? 1),
     alive: true,
     spawned: 0,
+    speed: options.speed ?? 0,
+    damage: options.damage ?? 0,
+    target: null,
+    velocity: new THREE.Vector3(),
     healthBar: healthBar(options.barWidth ?? 1.2),
   };
   building.healthBar.position.set(0, options.barY ?? 1.6, 0);
@@ -1016,8 +1048,8 @@ function createGoblinDen(point, level) {
   const building = registerGoblinBuilding(den, {
     type: "den",
     level,
-    hp: 220 + level * 45,
-    cooldown: Math.max(2.8, 6 - level * 0.35),
+    hp: 260 + level * 58,
+    cooldown: Math.max(2.2, 4.8 - level * 0.32),
     radius: 1.2,
     barY: 2.35,
   });
@@ -1037,10 +1069,10 @@ function createSpikeTrap(point, level) {
   const building = registerGoblinBuilding(trap, {
     type: "spikes",
     level,
-    hp: 120 + level * 25,
-    cooldown: Math.max(0.65, 1.3 - level * 0.06),
+    hp: 180 + level * 34,
+    cooldown: Math.max(0.38, 0.82 - level * 0.05),
     radius: 1.3,
-    range: 1.55,
+    range: 2.25 + level * 0.08,
     barY: 1.05,
   });
   return building;
@@ -1048,24 +1080,38 @@ function createSpikeTrap(point, level) {
 
 function createCatapult(point, level) {
   const catapult = new THREE.Group();
+  catapult.userData.wheels = [];
   catapult.position.set(point.x, sampleTerrainHeight(point.x, point.z) + 0.08, point.z);
   addBlock(0, 0, 0, 1.8, 0.36, 1.4, materialSet(materials.wood), catapult);
+  addBlock(0, 0.18, 0.08, 1.25, 0.22, 1.0, materialSet(materials.trim, materials.wood), catapult);
   addBlock(-0.58, 0.22, 0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
   addBlock(0.58, 0.22, 0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
   addBlock(-0.58, 0.22, -0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
   addBlock(0.58, 0.22, -0.55, 0.34, 0.34, 0.34, materialSet(materials.stone), catapult);
   addBlock(0, 0.46, -0.18, 0.28, 1.2, 0.24, materialSet(materials.wood), catapult);
   addBlock(0, 1.3, 0.32, 0.22, 0.22, 1.55, materialSet(materials.trim), catapult);
+  for (const x of [-0.74, 0.74]) {
+    for (const z of [-0.55, 0.55]) {
+      const wheel = new THREE.Mesh(wheelGeometry, materials.stone);
+      wheel.position.set(x, 0.18, z);
+      wheel.castShadow = true;
+      wheel.receiveShadow = true;
+      catapult.userData.wheels.push(wheel);
+      catapult.add(wheel);
+    }
+  }
   const building = registerGoblinBuilding(catapult, {
     type: "catapult",
     level,
-    hp: 260 + level * 50,
-    cooldown: Math.max(1.6, 3.4 - level * 0.18),
+    hp: 340 + level * 72,
+    cooldown: Math.max(1.2, 2.7 - level * 0.16),
+    damage: 64 + level * 18,
+    speed: 1.15 + level * 0.04,
     radius: 1.45,
-    range: 15 + level * 0.9,
+    range: 12.5 + level * 0.8,
     barY: 2.1,
   });
-  addBlocker(building, point.x, point.z, 2.0, 1.55, { pad: 0.24, targetSkip: true });
+  building.blocker = addBlocker(building, point.x, point.z, 2.0, 1.55, { pad: 0.24, targetSkip: true });
   return building;
 }
 
@@ -1079,10 +1125,10 @@ function createWarDrum(point, level) {
   const building = registerGoblinBuilding(drum, {
     type: "drum",
     level,
-    hp: 190 + level * 38,
+    hp: 240 + level * 48,
     cooldown: 1,
     radius: 1.2,
-    range: 7 + level * 0.4,
+    range: 8.5 + level * 0.55,
     barY: 2.2,
   });
   addBlocker(building, point.x, point.z, 1.45, 1.45, { pad: 0.24, targetSkip: true });
@@ -1222,6 +1268,7 @@ function spawnUnit(type, position, burst = true, level = 1) {
     target: null,
     home: new THREE.Vector3(position.x, 0, position.z),
     wander: new THREE.Vector3(position.x + rand(-4, 4), 0, position.z + rand(-4, 4)),
+    slowUntil: 0,
     alive: true,
     frameSeed: Math.random() * 10,
   };
@@ -1281,6 +1328,28 @@ function nearestStructure(from, predicate = () => true) {
   return best;
 }
 
+function nearestGoblinBuilding(from, predicate = () => true, maxDistance = Infinity) {
+  let best = null;
+  let bestDist = maxDistance * maxDistance;
+  for (const building of goblinBuildings) {
+    if (!building.alive || !predicate(building)) continue;
+    const dist = from.distanceToSquared(building.position);
+    if (dist < bestDist) {
+      best = building;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function nearestDefenderTarget(from, maxDistance = Infinity) {
+  const unitTarget = nearestUnit(from, (unit) => unit.team === "goblin", maxDistance);
+  const buildingTarget = nearestGoblinBuilding(from, () => true, maxDistance);
+  if (!unitTarget) return buildingTarget;
+  if (!buildingTarget) return unitTarget;
+  return from.distanceToSquared(unitTarget.position) <= from.distanceToSquared(buildingTarget.position) ? unitTarget : buildingTarget;
+}
+
 function nearestHumanTarget(unit, maxDistance) {
   return nearestUnit(
     unit.position,
@@ -1296,6 +1365,23 @@ function damageUnit(unit, amount) {
     unitGroup.remove(unit.sprite, unit.shadow);
     if (unit.team === "defender" || unit.team === "civilian") game.spoils += 1;
   }
+}
+
+function damageGoblinBuilding(building, amount) {
+  building.hp -= amount;
+  setHealthBar(building);
+  if (building.hp <= 0 && building.alive) {
+    building.alive = false;
+    removeOwnedBlockers(building);
+    createSpawnBurst(building.position.clone(), building.type === "catapult" ? 0xb6a58a : 0x83c16b);
+    structureGroup.remove(building.group);
+  }
+}
+
+function damageCombatTarget(target, amount) {
+  if (target.sprite) damageUnit(target, amount);
+  else if (goblinBuildings.includes(target)) damageGoblinBuilding(target, amount);
+  else damageStructure(target, amount);
 }
 
 function damageStructure(structure, amount) {
@@ -1389,6 +1475,7 @@ function steerAroundObstacles(unit, direction, targetEntity) {
   const aheadZ = unit.position.z + direction.z * lookAhead;
 
   forEachBlockingObstacle((blocker) => {
+    if (blocker.owner === unit) return;
     if (blocker.owner === targetEntity && blocker.targetSkip) return;
     const bounds = expandedBlockerBounds(blocker, unit);
     if (!segmentIntersectsBounds(unit.position.x, unit.position.z, aheadX, aheadZ, bounds)) return;
@@ -1409,6 +1496,8 @@ function steerAroundObstacles(unit, direction, targetEntity) {
 
 function separateFromObstacles(unit, targetEntity) {
   forEachBlockingObstacle((blocker) => {
+    if (blocker.owner === unit) return;
+    if (blocker.owner === targetEntity && blocker.targetSkip) return;
     const bounds = expandedBlockerBounds(blocker, unit);
     if (!pointInsideBounds(unit.position.x, unit.position.z, bounds)) return;
 
@@ -1442,7 +1531,7 @@ function moveToward(unit, targetPosition, dt, stopDistance = 0, targetEntity = n
   const side = new THREE.Vector3(-direction.z, 0, direction.x).multiplyScalar(wiggle);
   unit.velocity
     .copy(direction.add(side).normalize())
-    .multiplyScalar(unit.speed * speedMultiplier * goblinDrumMultiplier(unit, "speed"));
+    .multiplyScalar(unit.speed * speedMultiplier * goblinDrumMultiplier(unit, "speed") * (game.time < (unit.slowUntil ?? 0) ? 0.52 : 1));
   unit.position.addScaledVector(unit.velocity, dt);
   unit.position.x = clamp(unit.position.x, -HALF_MAP + 0.8, HALF_MAP - 0.8);
   unit.position.z = clamp(unit.position.z, -HALF_MAP + 0.8, HALF_MAP - 0.8);
@@ -1480,7 +1569,7 @@ function updateGoblin(unit, dt) {
 }
 
 function updateKnight(unit, dt) {
-  unit.target = nearestUnit(unit.position, (other) => other.team === "goblin", 10);
+  unit.target = nearestDefenderTarget(unit.position, 12);
   if (!unit.target) {
     const guard = baseStructure?.alive ? baseStructure.position : new THREE.Vector3(0, 0, -4);
     const patrol = tmpPoint.set(
@@ -1497,7 +1586,7 @@ function updateKnight(unit, dt) {
     unit.attackTimer -= dt;
     if (unit.attackTimer <= 0) {
       unit.attackTimer = unit.cooldown;
-      damageUnit(unit.target, unit.damage);
+      damageCombatTarget(unit.target, unit.damage);
       createHitParticle(unit.target.position, 0xbcd5e6);
     }
   }
@@ -1552,12 +1641,28 @@ function shootTower(tower, target) {
   effectGroup.add(mesh);
 }
 
+function shootCatapult(catapult, target) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0x6d6d66 }),
+  );
+  mesh.position.set(catapult.position.x, catapult.position.y + 1.35, catapult.position.z);
+  projectiles.push({
+    mesh,
+    target,
+    speed: 8.8,
+    damage: catapult.damage,
+    alive: true,
+  });
+  effectGroup.add(mesh);
+}
+
 function updateTowers(dt) {
   for (const structure of structures) {
     if (!structure.alive || structure.type !== "tower") continue;
     structure.reload -= dt;
     if (structure.reload > 0) continue;
-    const target = nearestUnit(structure.position, (unit) => unit.team === "goblin", structure.attackRange);
+    const target = nearestDefenderTarget(structure.position, structure.attackRange);
     if (target) {
       structure.reload = structure.attackCooldown;
       shootTower(structure, target);
@@ -1576,7 +1681,7 @@ function updateProjectiles(dt) {
     const dist = tmpVec.length();
     if (dist < 0.25) {
       projectile.alive = false;
-      damageUnit(projectile.target, projectile.damage);
+      damageCombatTarget(projectile.target, projectile.damage);
       createHitParticle(projectile.target.position, 0xf5d27d);
       effectGroup.remove(projectile.mesh);
       continue;
@@ -1646,32 +1751,71 @@ function updateDefenderSpawns(dt) {
   }
 }
 
+function syncBuildingToTerrain(building) {
+  building.position.y = sampleTerrainHeight(building.position.x, building.position.z) + 0.08;
+  syncOwnedBlockers(building);
+}
+
 function updateGoblinBuildings(dt) {
   for (const building of goblinBuildings) {
     if (!building.alive) continue;
     building.reload -= dt;
+
+    if (building.type === "catapult") {
+      const target = nearestStructure(building.position);
+      building.target = target;
+      if (!target) {
+        building.velocity.multiplyScalar(0.7);
+        continue;
+      }
+
+      const distance = building.position.distanceTo(target.position);
+      if (distance > building.range) {
+        moveToward(building, target.position, dt, building.range * 0.88, target, 1);
+        syncBuildingToTerrain(building);
+        if (building.velocity.lengthSq() > 0.002) {
+          building.group.rotation.y = Math.atan2(building.velocity.x, building.velocity.z);
+          for (const wheel of building.group.userData.wheels ?? []) wheel.rotation.x += building.velocity.length() * dt * 3.6;
+        }
+        building.reload = Math.min(building.reload, 0.28);
+        continue;
+      }
+
+      building.velocity.multiplyScalar(0.75);
+      syncBuildingToTerrain(building);
+      if (building.reload <= 0) {
+        building.reload = building.cooldown;
+        shootCatapult(building, target);
+      }
+      continue;
+    }
+
     if (building.reload > 0) continue;
 
     if (building.type === "den") {
       const nearby = units.filter((unit) => unit.alive && unit.team === "goblin" && unit.position.distanceToSquared(building.position) < 36).length;
-      if (nearby < 6 + building.level && building.spawned < 4 + building.level * 2) {
+      if (nearby < 9 + building.level * 2) {
         building.reload = building.cooldown;
         building.spawned += 1;
         const pos = new THREE.Vector3(building.position.x + rand(-1.2, 1.2), 0, building.position.z + rand(-1.2, 1.2));
         spawnUnit("raider", pos, true, building.level);
       } else {
-        building.reload = 1.2;
+        building.reload = 0.8;
       }
     }
 
     if (building.type === "spikes") {
       const targets = units.filter(
-        (unit) => unit.alive && unit.team === "defender" && unit.position.distanceToSquared(building.position) <= building.range * building.range,
+        (unit) =>
+          unit.alive &&
+          (unit.team === "defender" || unit.team === "civilian") &&
+          unit.position.distanceToSquared(building.position) <= building.range * building.range,
       );
       if (targets.length) {
         building.reload = building.cooldown;
         for (const target of targets) {
-          damageUnit(target, 26 + building.level * 8);
+          target.slowUntil = Math.max(target.slowUntil ?? 0, game.time + 1.05);
+          damageUnit(target, 34 + building.level * 12);
           createHitParticle(target.position, 0xddd0a8);
         }
       } else {
@@ -1679,15 +1823,16 @@ function updateGoblinBuildings(dt) {
       }
     }
 
-    if (building.type === "catapult") {
-      const target = nearestStructure(building.position, (structure) => structure.type !== "base" || building.position.distanceTo(structure.position) < 13);
-      if (target && building.position.distanceTo(target.position) <= building.range) {
-        building.reload = building.cooldown;
-        damageStructure(target, 42 + building.level * 12);
-        createHitParticle(target.position, 0xb6a58a);
-      } else {
-        building.reload = 0.45;
+    if (building.type === "drum") {
+      building.reload = building.cooldown;
+      let helped = false;
+      for (const unit of units) {
+        if (!unit.alive || unit.team !== "goblin") continue;
+        if (unit.position.distanceToSquared(building.position) > building.range * building.range) continue;
+        unit.hp = Math.min(unit.maxHp, unit.hp + 4 + building.level * 2);
+        helped = true;
       }
+      if (helped) createHitParticle(building.position, 0xe4bb58);
     }
   }
 }
@@ -1886,6 +2031,8 @@ function updateCardDrag(event) {
   const actionPoint = actionPointForDrop(dragState.card, point);
   dragState.point = actionPoint;
   dragState.valid = !!actionPoint && game.rage >= cardManaCost(dragState.card);
+  if (dragState.card.type === "territory") updateTerritoryPlacementOverlay(point);
+  else hideTerritoryOverlay();
   spawnPreview.visible = !!point;
   if (point) {
     const previewPoint = actionPoint ?? point;
@@ -1910,6 +2057,7 @@ function endCardDrag() {
   dragState.ghost.remove();
   dragState = null;
   spawnPreview.visible = false;
+  hideTerritoryOverlay();
 }
 
 function canSpawnAt(point) {
