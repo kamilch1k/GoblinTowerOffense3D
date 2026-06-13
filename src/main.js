@@ -324,21 +324,149 @@ function pixelNoise(x, y, seed) {
   return Math.sin((x + 1) * 12.9898 + (y + 3) * 78.233 + seed * 37.719) % 1;
 }
 
-function texturePatch(ctx, rgb, x, y, w, h, shade = 0) {
-  ctx.fillStyle = colorString(rgb, shade);
-  ctx.fillRect(x, y, w, h);
+const TERRAIN_16_PATTERNS = {
+  grassTop: [
+    "0100200010002001",
+    "0001002000200010",
+    "1000020001000200",
+    "0020100000201000",
+    "0000201000010002",
+    "2010000102000100",
+    "0001000020001000",
+    "0100200100010002",
+    "1000002001000200",
+    "0020100000200010",
+    "0002001000010002",
+    "0100000102001000",
+    "1001000020000100",
+    "0000200100010200",
+    "0201000002001000",
+    "1000010200000102",
+  ],
+  dirtBlock: [
+    "0020100301202001",
+    "2300012020010030",
+    "0102300012100200",
+    "0010023000120031",
+    "3201000122001000",
+    "0002310000102203",
+    "1020003100200100",
+    "0001200030012020",
+    "2030001200100300",
+    "0010200312001002",
+    "1200030010200300",
+    "0002100200031020",
+    "3020010001200300",
+    "0100302010001200",
+    "2001000302100001",
+    "0002301000203100",
+  ],
+  mud: [
+    "0020200302202002",
+    "2300022020020030",
+    "0202300022200200",
+    "0020023000220032",
+    "3202000222002000",
+    "0002320000202203",
+    "2020003200200200",
+    "0002200030022020",
+    "2030002200200300",
+    "0020200322002002",
+    "2200030020200300",
+    "0002200200032020",
+    "3020020002200300",
+    "0200302020002200",
+    "2002000302200002",
+    "0002302000203200",
+  ],
+  sand: [
+    "0000100000001000",
+    "0010000200010000",
+    "0000001000000010",
+    "1000000000200000",
+    "0002000010000000",
+    "0100000000001000",
+    "0000000200000001",
+    "0001000000100000",
+    "0000000010002000",
+    "0200010000000000",
+    "0000000001000001",
+    "0010000200000000",
+    "0000100000010000",
+    "1000000000000200",
+    "0002000100000000",
+    "0000000001000010",
+  ],
+  water: [
+    "0000000000000000",
+    "0000200000002000",
+    "1111111111111111",
+    "0000000000000000",
+    "0000002220000000",
+    "0000000000000000",
+    "0000000000000000",
+    "1111111111111111",
+    "0000200000200000",
+    "0000000000000000",
+    "0000222000002220",
+    "0000000000000000",
+    "1111111111111111",
+    "0000000000000000",
+    "0000002000000200",
+    "0000000000000000",
+  ],
+  path: [
+    "0010100010100100",
+    "1200012000100012",
+    "0012000101200010",
+    "0100010001001200",
+    "2001200100010010",
+    "0010001210000100",
+    "0100100012001001",
+    "1200010010001200",
+    "0010012001000010",
+    "0101200010012000",
+    "2000010012001001",
+    "0012000100010010",
+    "0100012001001200",
+    "1200100010010001",
+    "0010010001200100",
+    "0101200100012000",
+  ],
+  generic: [
+    "0010001000100100",
+    "1200010000100012",
+    "0012000101000010",
+    "0100010001001200",
+    "2001000100010010",
+    "0010001010000100",
+    "0100100012001001",
+    "1200010010001000",
+    "0010012001000010",
+    "0101000010012000",
+    "2000010012001001",
+    "0012000100010010",
+    "0100012001001000",
+    "1200100010010001",
+    "0010010001200100",
+    "0101000100012000",
+  ],
+};
+
+function terrainPalette(base, flecks) {
+  const palette = [base, ...flecks];
+  while (palette.length < 4) palette.push(base);
+  return palette;
 }
 
-function drawMinecraftPatches(ctx, kind, base, flecks, count) {
-  const size = TERRAIN_TEXTURE_SIZE;
-  const palette = flecks.length ? flecks : [base];
-  for (let i = 0; i < count; i += 1) {
-    const x = Math.floor(Math.abs(pixelNoise(i, i * 2, kind.length + 4)) * size);
-    const y = Math.floor(Math.abs(pixelNoise(i * 3, i, kind.length + 9)) * size);
-    const color = palette[i % palette.length];
-    const wide = i % 4 === 0;
-    const tall = i % 7 === 0;
-    texturePatch(ctx, color, x, y, Math.min(wide ? 2 : 1, size - x), Math.min(tall ? 2 : 1, size - y), Math.floor(pixelNoise(i, y, 2) * 4) - 1);
+function drawIndexedTerrainTexture(ctx, pattern, palette) {
+  for (let y = 0; y < TERRAIN_TEXTURE_SIZE; y += 1) {
+    const row = pattern[y] ?? pattern[0];
+    for (let x = 0; x < TERRAIN_TEXTURE_SIZE; x += 1) {
+      const paletteIndex = Number.parseInt(row[x] ?? "0", 10);
+      ctx.fillStyle = colorString(palette[Number.isNaN(paletteIndex) ? 0 : paletteIndex] ?? palette[0]);
+      ctx.fillRect(x, y, 1, 1);
+    }
   }
 }
 
@@ -348,41 +476,21 @@ function createPixelTexture(kind, baseHex, fleckHexes = []) {
   canvasTexture.width = size;
   canvasTexture.height = size;
   const ctx = canvasTexture.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
   const base = hexToRgb(baseHex);
   const flecks = fleckHexes.map(hexToRgb);
+  const palette = terrainPalette(base, flecks);
 
-  ctx.fillStyle = colorString(base);
-  ctx.fillRect(0, 0, size, size);
-
-  if (kind === "water") {
-    texturePatch(ctx, base, 0, 0, size, size);
-    const dark = flecks[1] ?? base;
-    const bright = flecks[2] ?? flecks[0] ?? base;
-    for (let y = 3; y < size; y += 5) {
-      texturePatch(ctx, dark, 0, y, size, 1, -4);
-      texturePatch(ctx, bright, 2 + (y % 4), y - 1, 5, 1, 3);
-      texturePatch(ctx, bright, 10 - (y % 3), y + 1, 4, 1, 0);
-    }
-  } else if (kind === "grassTop") {
-    drawMinecraftPatches(ctx, kind, base, flecks, 18);
-    texturePatch(ctx, flecks[1] ?? base, 3, 4, 2, 1, -2);
-    texturePatch(ctx, flecks[0] ?? base, 10, 9, 3, 1, 1);
-  } else if (kind === "dirtBlock" || kind === "mud") {
-    drawMinecraftPatches(ctx, kind, base, flecks, 14);
-    texturePatch(ctx, flecks[1] ?? base, 1, 11, 4, 2, -2);
-    texturePatch(ctx, flecks[0] ?? base, 9, 3, 3, 2, 1);
-  } else if (kind === "sand") {
-    drawMinecraftPatches(ctx, kind, base, flecks, 10);
-    texturePatch(ctx, flecks[1] ?? base, 2, 12, 3, 1, -1);
-    texturePatch(ctx, flecks[0] ?? base, 11, 5, 2, 1, 1);
-  } else {
-    drawMinecraftPatches(ctx, kind, base, flecks, 12);
-  }
+  drawIndexedTerrainTexture(ctx, TERRAIN_16_PATTERNS[kind] ?? TERRAIN_16_PATTERNS.generic, palette);
 
   if (kind === "grassSide") {
-    texturePatch(ctx, hexToRgb("#4f9b3b"), 0, 0, size, 3);
+    ctx.fillStyle = "#4f9b3b";
+    ctx.fillRect(0, 0, size, 3);
     const darkGrass = hexToRgb("#3b7c35");
-    for (let x = 0; x < size; x += 2) texturePatch(ctx, darkGrass, x, 2 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 2), 1, 1);
+    for (let x = 0; x < size; x += 2) {
+      ctx.fillStyle = colorString(darkGrass);
+      ctx.fillRect(x, 2 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 2), 1, 1);
+    }
   }
 
   if (kind === "path") {
@@ -404,8 +512,8 @@ function createPixelTexture(kind, baseHex, fleckHexes = []) {
   const texture = new THREE.CanvasTexture(canvasTexture);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestMipmapNearestFilter;
-  texture.generateMipmaps = true;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   textureCache.set(`terrain-${kind}`, texture);
