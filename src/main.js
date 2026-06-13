@@ -77,6 +77,8 @@ const HUD_UPDATE_INTERVAL = 0.16;
 const SPAWN_PARTICLE_COUNT = 5;
 const MAX_PARTICLES = 140;
 const STRUCTURE_BLOCK_CELL_SIZE = 1.75;
+const TERRAIN_TEXTURE_SIZE = 16;
+const TERRAIN_FLECK_COUNT = 24;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10181b);
@@ -324,7 +326,7 @@ function pixelNoise(x, y, seed) {
 }
 
 function createPixelTexture(kind, baseHex, fleckHexes = []) {
-  const size = 32;
+  const size = TERRAIN_TEXTURE_SIZE;
   const canvasTexture = document.createElement("canvas");
   canvasTexture.width = size;
   canvasTexture.height = size;
@@ -334,47 +336,47 @@ function createPixelTexture(kind, baseHex, fleckHexes = []) {
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      const shade = Math.floor(pixelNoise(x, y, kind.length) * 16) - 8;
+      const shade = Math.floor(pixelNoise(x, y, kind.length) * 10) - 5;
       ctx.fillStyle = colorString(base, shade);
       ctx.fillRect(x, y, 1, 1);
     }
   }
 
-  for (let i = 0; i < 76; i += 1) {
+  for (let i = 0; i < TERRAIN_FLECK_COUNT; i += 1) {
     const x = Math.floor(Math.abs(pixelNoise(i, i * 2, kind.length + 4)) * size);
     const y = Math.floor(Math.abs(pixelNoise(i * 3, i, kind.length + 9)) * size);
     const color = flecks[i % Math.max(1, flecks.length)] ?? base;
-    ctx.fillStyle = colorString(color, Math.floor(pixelNoise(i, y, 2) * 10));
-    ctx.fillRect(x, y, kind === "water" ? 3 : 1, 1);
+    ctx.fillStyle = colorString(color, Math.floor(pixelNoise(i, y, 2) * 6));
+    ctx.fillRect(x, y, kind === "water" ? 2 : 1, 1);
   }
 
   if (kind === "grassSide") {
     ctx.fillStyle = "#4f9b3b";
-    ctx.fillRect(0, 0, size, 6);
+    ctx.fillRect(0, 0, size, 3);
     ctx.fillStyle = "#3b7c35";
-    for (let x = 0; x < size; x += 2) ctx.fillRect(x, 5 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 3), 1, 2);
+    for (let x = 0; x < size; x += 2) ctx.fillRect(x, 2 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 2), 1, 1);
   }
 
   if (kind === "path") {
-    for (let y = 8; y < size; y += 8) {
+    for (let y = 4; y < size; y += 4) {
       ctx.fillStyle = "rgba(92, 68, 43, 0.34)";
       ctx.fillRect(0, y, size, 1);
     }
   }
 
   if (kind === "farm") {
-    for (let x = 4; x < size; x += 7) {
+    for (let x = 2; x < size; x += 4) {
       ctx.fillStyle = "#7f5629";
-      ctx.fillRect(x, 0, 3, size);
+      ctx.fillRect(x, 0, 2, size);
       ctx.fillStyle = "#7fc149";
-      for (let y = 3; y < size; y += 7) ctx.fillRect(x + 1, y, 1, 3);
+      for (let y = 2; y < size; y += 4) ctx.fillRect(x + 1, y, 1, 2);
     }
   }
 
   if (kind === "water") {
     ctx.fillStyle = "rgba(145, 218, 242, 0.45)";
-    for (let y = 6; y < size; y += 9) {
-      for (let x = 0; x < size; x += 8) ctx.fillRect(x + ((y / 3) % 5), y, 5, 1);
+    for (let y = 3; y < size; y += 5) {
+      for (let x = 0; x < size; x += 5) ctx.fillRect(x + ((y / 2) % 3), y, 3, 1);
     }
   }
 
