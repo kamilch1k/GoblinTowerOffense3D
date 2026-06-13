@@ -78,7 +78,6 @@ const SPAWN_PARTICLE_COUNT = 5;
 const MAX_PARTICLES = 140;
 const STRUCTURE_BLOCK_CELL_SIZE = 1.75;
 const TERRAIN_TEXTURE_SIZE = 16;
-const TERRAIN_FLECK_COUNT = 24;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10181b);
@@ -325,6 +324,24 @@ function pixelNoise(x, y, seed) {
   return Math.sin((x + 1) * 12.9898 + (y + 3) * 78.233 + seed * 37.719) % 1;
 }
 
+function texturePatch(ctx, rgb, x, y, w, h, shade = 0) {
+  ctx.fillStyle = colorString(rgb, shade);
+  ctx.fillRect(x, y, w, h);
+}
+
+function drawMinecraftPatches(ctx, kind, base, flecks, count) {
+  const size = TERRAIN_TEXTURE_SIZE;
+  const palette = flecks.length ? flecks : [base];
+  for (let i = 0; i < count; i += 1) {
+    const x = Math.floor(Math.abs(pixelNoise(i, i * 2, kind.length + 4)) * size);
+    const y = Math.floor(Math.abs(pixelNoise(i * 3, i, kind.length + 9)) * size);
+    const color = palette[i % palette.length];
+    const wide = i % 4 === 0;
+    const tall = i % 7 === 0;
+    texturePatch(ctx, color, x, y, Math.min(wide ? 2 : 1, size - x), Math.min(tall ? 2 : 1, size - y), Math.floor(pixelNoise(i, y, 2) * 4) - 1);
+  }
+}
+
 function createPixelTexture(kind, baseHex, fleckHexes = []) {
   const size = TERRAIN_TEXTURE_SIZE;
   const canvasTexture = document.createElement("canvas");
@@ -334,27 +351,38 @@ function createPixelTexture(kind, baseHex, fleckHexes = []) {
   const base = hexToRgb(baseHex);
   const flecks = fleckHexes.map(hexToRgb);
 
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const shade = Math.floor(pixelNoise(x, y, kind.length) * 10) - 5;
-      ctx.fillStyle = colorString(base, shade);
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
+  ctx.fillStyle = colorString(base);
+  ctx.fillRect(0, 0, size, size);
 
-  for (let i = 0; i < TERRAIN_FLECK_COUNT; i += 1) {
-    const x = Math.floor(Math.abs(pixelNoise(i, i * 2, kind.length + 4)) * size);
-    const y = Math.floor(Math.abs(pixelNoise(i * 3, i, kind.length + 9)) * size);
-    const color = flecks[i % Math.max(1, flecks.length)] ?? base;
-    ctx.fillStyle = colorString(color, Math.floor(pixelNoise(i, y, 2) * 6));
-    ctx.fillRect(x, y, kind === "water" ? 2 : 1, 1);
+  if (kind === "water") {
+    texturePatch(ctx, base, 0, 0, size, size);
+    const dark = flecks[1] ?? base;
+    const bright = flecks[2] ?? flecks[0] ?? base;
+    for (let y = 3; y < size; y += 5) {
+      texturePatch(ctx, dark, 0, y, size, 1, -4);
+      texturePatch(ctx, bright, 2 + (y % 4), y - 1, 5, 1, 3);
+      texturePatch(ctx, bright, 10 - (y % 3), y + 1, 4, 1, 0);
+    }
+  } else if (kind === "grassTop") {
+    drawMinecraftPatches(ctx, kind, base, flecks, 18);
+    texturePatch(ctx, flecks[1] ?? base, 3, 4, 2, 1, -2);
+    texturePatch(ctx, flecks[0] ?? base, 10, 9, 3, 1, 1);
+  } else if (kind === "dirtBlock" || kind === "mud") {
+    drawMinecraftPatches(ctx, kind, base, flecks, 14);
+    texturePatch(ctx, flecks[1] ?? base, 1, 11, 4, 2, -2);
+    texturePatch(ctx, flecks[0] ?? base, 9, 3, 3, 2, 1);
+  } else if (kind === "sand") {
+    drawMinecraftPatches(ctx, kind, base, flecks, 10);
+    texturePatch(ctx, flecks[1] ?? base, 2, 12, 3, 1, -1);
+    texturePatch(ctx, flecks[0] ?? base, 11, 5, 2, 1, 1);
+  } else {
+    drawMinecraftPatches(ctx, kind, base, flecks, 12);
   }
 
   if (kind === "grassSide") {
-    ctx.fillStyle = "#4f9b3b";
-    ctx.fillRect(0, 0, size, 3);
-    ctx.fillStyle = "#3b7c35";
-    for (let x = 0; x < size; x += 2) ctx.fillRect(x, 2 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 2), 1, 1);
+    texturePatch(ctx, hexToRgb("#4f9b3b"), 0, 0, size, 3);
+    const darkGrass = hexToRgb("#3b7c35");
+    for (let x = 0; x < size; x += 2) texturePatch(ctx, darkGrass, x, 2 + Math.floor(Math.abs(pixelNoise(x, 4, 3)) * 2), 1, 1);
   }
 
   if (kind === "path") {
@@ -373,18 +401,11 @@ function createPixelTexture(kind, baseHex, fleckHexes = []) {
     }
   }
 
-  if (kind === "water") {
-    ctx.fillStyle = "rgba(145, 218, 242, 0.45)";
-    for (let y = 3; y < size; y += 5) {
-      for (let x = 0; x < size; x += 5) ctx.fillRect(x + ((y / 2) % 3), y, 3, 1);
-    }
-  }
-
   const texture = new THREE.CanvasTexture(canvasTexture);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
+  texture.minFilter = THREE.NearestMipmapNearestFilter;
+  texture.generateMipmaps = true;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   textureCache.set(`terrain-${kind}`, texture);
