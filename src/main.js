@@ -293,7 +293,7 @@ async function loadTextureAsset(path, key = path) {
   return texture;
 }
 
-const unitSpriteSheet = await loadTextureAsset("/assets/unit-sprites.png", "unit-sprites");
+const unitSpriteSheet = await loadTextureAsset(`${import.meta.env.BASE_URL}assets/unit-sprites.png`, "unit-sprites");
 
 function spriteSheetFrame(row, col) {
   const key = `unit-frame-${row}-${col}`;
