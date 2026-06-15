@@ -97,6 +97,7 @@ const ISO_YAW = -Math.PI / 4;
 const ISO_PITCH = 0.82;
 const MIN_ZOOM = 34;
 const MAX_ZOOM = 116;
+const CAMERA_LOOK_HEIGHT = 1.1;
 const RESOURCE_LOW_WATER = 85;
 const THINK_INTERVAL = 2.1;
 const UI_INTERVAL = 0.18;
@@ -104,6 +105,7 @@ const UI_INTERVAL = 0.18;
 const tmpVec = new THREE.Vector3();
 const tmpVec2 = new THREE.Vector3();
 const tmpPoint = new THREE.Vector3();
+const tmpCameraLook = new THREE.Vector3();
 const pointerNdc = new THREE.Vector2();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const raycaster = new THREE.Raycaster();
@@ -318,7 +320,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 
 const camera = new THREE.PerspectiveCamera(31, window.innerWidth / window.innerHeight, 0.1, 900);
 const cameraState = {
-  target: new THREE.Vector3(0, 0, 0),
+  target: new THREE.Vector3(0, CAMERA_LOOK_HEIGHT, 0),
   distance: 82,
 };
 
@@ -370,6 +372,7 @@ const game = {
 
 const pointer = {
   active: false,
+  id: null,
   button: 0,
   startX: 0,
   startY: 0,
@@ -1757,6 +1760,7 @@ function onPointerDown(event) {
   const leftDragShouldSelect = leftButton && (event.shiftKey || dragStartedOnOwnEntity);
   const leftDragShouldPan = leftButton && !leftDragShouldSelect;
   pointer.active = true;
+  pointer.id = event.pointerId;
   pointer.button = event.button;
   pointer.startX = event.clientX;
   pointer.startY = event.clientY;
@@ -1774,7 +1778,11 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  hoverEntity = entityAtScreen(event.clientX, event.clientY);
+  if (pointer.active && pointer.id !== null && event.pointerId !== pointer.id) return;
+  if (!pointer.active) {
+    if (event.target === canvas) hoverEntity = entityAtScreen(event.clientX, event.clientY);
+    return;
+  }
   if (!pointer.active) return;
   const dx = event.clientX - pointer.x;
   const dy = event.clientY - pointer.y;
@@ -1783,17 +1791,29 @@ function onPointerMove(event) {
   pointer.moved = pointer.moved || Math.hypot(totalDx, totalDy) > 5;
   pointer.x = event.clientX;
   pointer.y = event.clientY;
+  if (pointer.panning) {
+    if (pointer.moved) panCamera(dx, dy);
+    event.preventDefault();
+    return;
+  }
+  hoverEntity = entityAtScreen(event.clientX, event.clientY);
   if (pointer.selecting) updateSelectionBox(pointer.startX, pointer.startY, event.clientX, event.clientY);
-  if (pointer.panning && pointer.moved) panCamera(dx, dy);
 }
 
 function onPointerUp(event) {
   if (!pointer.active) return;
+  if (pointer.id !== null && event.pointerId !== pointer.id) return;
   const wasSelecting = pointer.selecting;
   const wasPanning = pointer.panning;
   pointer.active = false;
+  pointer.id = null;
   pointer.selecting = false;
   pointer.panning = false;
+  try {
+    canvas.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // The browser may already release capture after a context-menu/right-button gesture.
+  }
   canvas.classList.remove("panning", "selecting");
   hideSelectionBox();
   if (wasSelecting) {
@@ -1812,8 +1832,8 @@ function panCamera(dx, dy) {
   const scale = cameraState.distance / Math.min(window.innerWidth, window.innerHeight) * 0.72;
   const forward = new THREE.Vector3(Math.sin(ISO_YAW), 0, Math.cos(ISO_YAW)).normalize();
   const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
-  cameraState.target.addScaledVector(right, -dx * scale);
-  cameraState.target.addScaledVector(forward, dy * scale);
+  cameraState.target.addScaledVector(right, dx * scale);
+  cameraState.target.addScaledVector(forward, -dy * scale);
   cameraState.target.x = clamp(cameraState.target.x, -HALF_MAP + 8, HALF_MAP - 8);
   cameraState.target.z = clamp(cameraState.target.z, -HALF_MAP + 8, HALF_MAP - 8);
 }
@@ -1836,9 +1856,10 @@ function updateCamera() {
     Math.sin(ISO_PITCH),
     Math.cos(ISO_YAW) * Math.cos(ISO_PITCH),
   );
-  cameraState.target.y = sampleTerrainHeight(cameraState.target.x, cameraState.target.z);
-  camera.position.copy(cameraState.target).addScaledVector(direction, cameraState.distance);
-  camera.lookAt(cameraState.target);
+  tmpCameraLook.copy(cameraState.target);
+  tmpCameraLook.y = CAMERA_LOOK_HEIGHT;
+  camera.position.copy(tmpCameraLook).addScaledVector(direction, cameraState.distance);
+  camera.lookAt(tmpCameraLook);
 }
 
 function zoomCamera(factor) {
@@ -1848,6 +1869,7 @@ function zoomCamera(factor) {
 
 function resetCamera() {
   cameraState.target.copy(playerFaction?.hq?.position ?? new THREE.Vector3(0, 0, 0));
+  cameraState.target.y = CAMERA_LOOK_HEIGHT;
   cameraState.distance = 82;
   updateCamera();
 }
@@ -2044,10 +2066,11 @@ function togglePause() {
 
 function bindEvents() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+  canvas.addEventListener("auxclick", (event) => event.preventDefault());
   canvas.addEventListener("pointerdown", onPointerDown);
-  canvas.addEventListener("pointermove", onPointerMove);
-  canvas.addEventListener("pointerup", onPointerUp);
-  canvas.addEventListener("pointercancel", onPointerUp);
+  window.addEventListener("pointermove", onPointerMove, { passive: false });
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
     zoomCamera(event.deltaY > 0 ? 1.08 : 0.92);
