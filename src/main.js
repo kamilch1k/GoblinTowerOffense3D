@@ -750,6 +750,7 @@ function createTreeCluster(x, z, height, scale = 1) {
   addBlock(group, materials.leaves, 0, 1.02 * scale, 0, 1.25 * scale, 0.72 * scale, 1.25 * scale);
   addBlock(group, materials.leavesDark, -0.24 * scale, 1.52 * scale, 0.14 * scale, 0.86 * scale, 0.58 * scale, 0.86 * scale);
   group.position.set(x, height, z);
+  freezeStaticObject(group);
   terrainGroup.add(group);
 }
 
@@ -760,6 +761,7 @@ function createRockOutcrop(x, z, height, scale = 1) {
   addBlock(group, materials.outcrop, 0.44 * scale, 0.34 * scale, -0.28 * scale, 0.5 * scale, 0.44 * scale, 0.6 * scale);
   group.rotation.y = mapNoise(x, z, 19) * Math.PI;
   group.position.set(x, height, z);
+  freezeStaticObject(group);
   terrainGroup.add(group);
 }
 
@@ -790,46 +792,146 @@ function factionMaterials(faction) {
     accent: new THREE.MeshStandardMaterial({ color: faction.accent, roughness: 0.72, flatShading: true }),
     dark: new THREE.MeshStandardMaterial({ color: 0x1d2326, roughness: 0.9, flatShading: true }),
     glass: new THREE.MeshStandardMaterial({ color: faction.accent, roughness: 0.45, emissive: faction.accent, emissiveIntensity: 0.16, flatShading: true }),
+    stone: new THREE.MeshStandardMaterial({ color: 0x97968d, roughness: 0.94, flatShading: true }),
+    trim: new THREE.MeshStandardMaterial({ color: 0xc5bea3, roughness: 0.88, flatShading: true }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x735033, roughness: 0.92, flatShading: true }),
+    plaster: new THREE.MeshStandardMaterial({ color: 0xbda982, roughness: 0.9, flatShading: true }),
+    roof: new THREE.MeshStandardMaterial({ color: faction.color, roughness: 0.82, flatShading: true }),
+    thatch: new THREE.MeshStandardMaterial({ color: 0xa48545, roughness: 0.96, flatShading: true }),
   };
   return faction.materials;
+}
+
+function freezeStaticObject(object) {
+  object.traverse((child) => {
+    child.updateMatrix();
+    child.matrixAutoUpdate = false;
+  });
+  object.updateMatrix();
+  object.matrixAutoUpdate = false;
+}
+
+function addRoofPrism(group, material, x, y, z, sx, sy, sz) {
+  const x0 = x - sx / 2;
+  const x1 = x + sx / 2;
+  const z0 = z - sz / 2;
+  const z1 = z + sz / 2;
+  const y0 = y;
+  const y1 = y + sy;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute([
+    x0, y0, z0, x1, y0, z0, x, y1, z0,
+    x0, y0, z1, x1, y0, z1, x, y1, z1,
+  ], 3));
+  geometry.setIndex([
+    0, 1, 2,
+    4, 3, 5,
+    3, 0, 2, 3, 2, 5,
+    1, 4, 5, 1, 5, 2,
+    0, 3, 4, 0, 4, 1,
+  ]);
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, material);
+  group.add(mesh);
+  return mesh;
+}
+
+function addCrenels(group, material, y, halfX, halfZ, size = 0.42) {
+  for (let i = -1; i <= 1; i += 2) {
+    addBlock(group, material, i * halfX, y, -halfZ, size, size, size);
+    addBlock(group, material, i * halfX, y, halfZ, size, size, size);
+    addBlock(group, material, -halfX, y, i * halfZ, size, size, size);
+    addBlock(group, material, halfX, y, i * halfZ, size, size, size);
+  }
+}
+
+function addVillageHouse(group, mats, roofMaterial = mats.thatch) {
+  addBlock(group, mats.plaster, 0, 0, 0, 2.85, 1.35, 2.35);
+  addBlock(group, mats.wood, 0, 0, 1.22, 0.48, 0.8, 0.14);
+  addBlock(group, mats.stone, -0.92, 0.1, 1.24, 0.42, 0.62, 0.16);
+  addBlock(group, mats.stone, 0.92, 0.1, 1.24, 0.42, 0.62, 0.16);
+  addBlock(group, mats.dark, 0, 0.1, 1.33, 0.42, 0.72, 0.1);
+  addBlock(group, mats.glass, -0.72, 0.68, 1.35, 0.28, 0.28, 0.08);
+  addBlock(group, mats.glass, 0.72, 0.68, 1.35, 0.28, 0.28, 0.08);
+  addRoofPrism(group, roofMaterial, 0, 1.22, 0, 3.3, 1.04, 2.75);
+  addBlock(group, mats.stone, 0.82, 1.74, -0.62, 0.28, 0.72, 0.28);
+}
+
+function addStoneTower(group, mats, withBarrel = false) {
+  addBlock(group, mats.stone, 0, 0, 0, 1.9, 3.15, 1.9);
+  addBlock(group, mats.trim, 0, 3.05, 0, 2.24, 0.48, 2.24);
+  addCrenels(group, mats.stone, 3.45, 0.72, 0.72);
+  addBlock(group, mats.dark, 0, 0.12, 0.98, 0.5, 0.85, 0.12);
+  if (withBarrel) {
+    const barrel = addBlock(group, mats.dark, 0, 2.75, 1.14, 0.28, 0.28, 1.65);
+    barrel.name = "barrel";
+  }
+}
+
+function addWallSegment(group, mats, x, z, w, d) {
+  addBlock(group, mats.stone, x, 0.04, z, w, 1.25, d);
+  const count = Math.max(1, Math.floor(Math.max(w, d)));
+  for (let i = 0; i < count; i += 1) {
+    const px = w > d ? x - w / 2 + 0.5 + i : x;
+    const pz = w > d ? z : z - d / 2 + 0.5 + i;
+    addBlock(group, mats.stone, px, 1.25, pz, 0.38, 0.36, 0.38);
+  }
 }
 
 function createStructureModel(type, faction) {
   const mats = factionMaterials(faction);
   const group = new THREE.Group();
   if (type === "hq") {
-    addBlock(group, mats.primary, 0, 0, 0, 4.2, 1.5, 4.2);
-    addBlock(group, mats.color, 0, 1.5, 0, 2.6, 1.1, 2.6);
-    addBlock(group, mats.accent, -1.55, 2.1, -1.55, 0.58, 1.25, 0.58);
-    addBlock(group, mats.accent, 1.55, 2.1, 1.55, 0.58, 1.25, 0.58);
-    addBlock(group, mats.dark, 0, 2.6, 0, 1.2, 0.35, 1.2);
+    addBlock(group, mats.stone, 0, 0, 0, 4.7, 2.35, 4.2);
+    addBlock(group, mats.trim, 0, 2.28, 0, 3.65, 0.7, 3.1);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) addBlock(group, mats.stone, sx * 2.15, 0.04, sz * 1.78, 1.05, 3.2, 1.05);
+    }
+    addBlock(group, mats.color, 0, 3.05, 0, 4.35, 0.34, 0.5);
+    addBlock(group, mats.accent, 0, 3.42, 0, 3.35, 0.22, 0.28);
+    addWallSegment(group, mats, 0, 3.95, 7.2, 0.55);
+    addWallSegment(group, mats, -3.85, 0.35, 0.55, 7.2);
+    addWallSegment(group, mats, 3.85, 0.35, 0.55, 7.2);
   } else if (type === "refinery") {
-    addBlock(group, mats.primary, 0, 0, 0, 2.8, 1, 2.3);
-    addBlock(group, mats.glass, -0.7, 1, -0.2, 0.8, 1.2, 0.8);
-    addBlock(group, mats.color, 0.8, 1, 0.4, 0.7, 0.8, 0.7);
-    addBlock(group, mats.dark, 1.25, 0.9, -0.75, 0.35, 1.6, 0.35);
+    addBlock(group, mats.stone, 0, 0, 0, 2.7, 0.9, 2.2);
+    addRoofPrism(group, mats.roof, -0.25, 0.86, -0.05, 2.45, 0.7, 2.35);
+    addBlock(group, mats.dark, 1.18, 0.84, -0.72, 0.34, 1.55, 0.34);
+    addBlock(group, mats.glass, -0.76, 0.88, 0.35, 0.72, 0.75, 0.72);
+    addBlock(group, mats.accent, 0.86, 0.12, 1.1, 0.64, 0.48, 0.34);
   } else if (type === "barracks") {
-    addBlock(group, mats.primary, 0, 0, 0, 3.4, 1.1, 2.5);
-    addBlock(group, mats.color, 0, 1.1, 0, 3.8, 0.42, 2.9);
-    addBlock(group, mats.dark, -1.05, 0.15, 1.26, 0.75, 0.8, 0.18);
-    addBlock(group, mats.dark, 1.05, 0.15, 1.26, 0.75, 0.8, 0.18);
+    addVillageHouse(group, mats, mats.roof);
+    addBlock(group, mats.wood, -1.7, 0.05, 0.1, 0.55, 1.15, 1.65);
+    addBlock(group, mats.wood, 1.7, 0.05, 0.1, 0.55, 1.15, 1.65);
+    addBlock(group, mats.color, 0, 1.9, 1.46, 0.16, 0.75, 0.16);
   } else if (type === "solar") {
-    addBlock(group, mats.dark, 0, 0, 0, 1.3, 0.55, 1.3);
+    addBlock(group, mats.stone, 0, 0, 0, 1.3, 0.55, 1.3);
     for (let i = -1; i <= 1; i += 2) {
       const panel = addBlock(group, mats.glass, i * 0.95, 0.65, 0, 1.35, 0.12, 2.2);
       panel.rotation.z = i * -0.22;
     }
   } else if (type === "turret") {
-    addBlock(group, mats.primary, 0, 0, 0, 1.65, 0.8, 1.65);
-    addBlock(group, mats.color, 0, 0.8, 0, 0.95, 0.85, 0.95);
-    const barrel = addBlock(group, mats.dark, 0, 1.22, 0.92, 0.28, 0.28, 1.55);
-    barrel.name = "barrel";
+    addStoneTower(group, mats, true);
   } else if (type === "academy") {
-    addBlock(group, mats.primary, 0, 0, 0, 2.5, 1.05, 2.5);
-    addBlock(group, mats.glass, 0, 1.05, 0, 1.25, 1.9, 1.25);
-    addBlock(group, mats.accent, 0, 2.95, 0, 0.55, 0.45, 0.55);
+    addVillageHouse(group, mats, mats.thatch);
+    addBlock(group, mats.glass, 0, 1.18, -0.25, 1.05, 1.45, 1.05);
+    addRoofPrism(group, mats.accent, 0, 2.52, -0.25, 1.22, 0.72, 1.22);
+    addBlock(group, mats.accent, 0, 3.2, -0.25, 0.3, 0.45, 0.3);
   }
   return group;
+}
+
+function structureBarHeight(type) {
+  if (type === "hq") return 5.15;
+  if (type === "turret") return 4.55;
+  if (type === "academy") return 3.8;
+  if (type === "barracks") return 3.2;
+  return 2.75;
+}
+
+function structureFireHeight(type) {
+  if (type === "hq") return 3.8;
+  if (type === "turret") return 3.65;
+  return 2.1;
 }
 
 function createSelectionRing(radius, faction, hostile = false) {
@@ -889,7 +991,7 @@ function createStructure(type, faction, x, z, free = false) {
     rallyPoint: new THREE.Vector3(x + rand(-3, 3), 0, z + rand(-3, 3)),
     selectRing: createSelectionRing(definition.radius, faction),
     healthBar: null,
-    barHeight: type === "hq" ? 4.4 : 3.2,
+    barHeight: structureBarHeight(type),
     group,
   };
   structure.healthBar = createHealthBar(structure, type === "hq" ? 3.2 : 2.2);
@@ -1497,7 +1599,7 @@ function updateStructures(dt) {
       const material = new THREE.MeshBasicMaterial({ color: faction.accent });
       const mesh = new THREE.Mesh(shotGeometry, material);
       mesh.position.copy(structure.position);
-      mesh.position.y += structure.type === "hq" ? 2.7 : 1.8;
+      mesh.position.y += structureFireHeight(structure.type);
       effectGroup.add(mesh);
       projectiles.push({
         mesh,
@@ -1756,9 +1858,8 @@ function onPointerDown(event) {
   if (!game.started || document.body.classList.contains("menu-open")) return;
   const startEntity = entityAtScreen(event.clientX, event.clientY);
   const leftButton = event.button === 0;
-  const dragStartedOnOwnEntity = startEntity?.faction === playerFaction;
-  const leftDragShouldSelect = leftButton && (event.shiftKey || dragStartedOnOwnEntity);
-  const leftDragShouldPan = leftButton && !leftDragShouldSelect;
+  const rightButton = event.button === 2;
+  if (!leftButton && !rightButton) return;
   pointer.active = true;
   pointer.id = event.pointerId;
   pointer.button = event.button;
@@ -1768,8 +1869,8 @@ function onPointerDown(event) {
   pointer.y = event.clientY;
   pointer.moved = false;
   pointer.startEntity = startEntity;
-  pointer.selecting = leftDragShouldSelect;
-  pointer.panning = leftDragShouldPan || event.button === 1 || event.button === 2;
+  pointer.selecting = leftButton;
+  pointer.panning = rightButton;
   if (pointer.selecting) startSelectionBox(event.clientX, event.clientY);
   if (pointer.selecting) canvas.classList.add("selecting");
   if (pointer.panning) canvas.classList.add("panning");
@@ -1823,7 +1924,6 @@ function onPointerUp(event) {
     const point = screenToWorld(event.clientX, event.clientY);
     const target = entityAtScreen(event.clientX, event.clientY);
     if (pointer.button === 2) issueOrder(point, target);
-    else if (!target || target.faction !== playerFaction) selectEntities([], event.shiftKey);
   }
   pointer.startEntity = null;
 }
