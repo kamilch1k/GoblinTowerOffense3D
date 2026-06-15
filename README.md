@@ -2,6 +2,8 @@
 
 A Three.js isometric AFK RTS prototype. Four civilizations start with HQs, gather food/ore/power, build bases, train armies, defend, and launch attacks automatically. You rule the Verdant Concord by changing doctrine or by directly selecting units and issuing orders.
 
+GitHub Pages target: https://kamilch1k.github.io/GoblinTowerOffense3D/
+
 ## Run
 
 ```bash
