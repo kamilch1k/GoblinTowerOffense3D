@@ -1,6 +1,6 @@
-# Goblin Tower Offense 3D
+# AFK Dominion RTS
 
-A small Three.js tower offense prototype built around a large sloped low-poly terrain map, blocky medieval villages, image-generated pixel-art units, procedural block textures, deck building, territory claiming, and billboard sprite combat.
+A Three.js isometric AFK RTS prototype. Four civilizations start with HQs, gather food/ore/power, build bases, train armies, defend, and launch attacks automatically. You rule the Verdant Concord by changing doctrine or by directly selecting units and issuing orders.
 
 ## Run
 
@@ -9,22 +9,33 @@ npm install
 npm run dev
 ```
 
-Or use `Launch Goblin Tower Offense 3D.cmd` / the Desktop shortcut to start the local dev server and open the game.
+Or use the existing Windows launcher/desktop shortcut; it will pick a free local port if another Vite app is already running.
+
+This branch can also be served on another Vite port, for example:
+
+```bash
+npm run dev -- --host 127.0.0.1 --port 5174
+```
 
 ## Controls
 
-- Drag the map to pan the commander camera.
-- Mouse wheel zooms.
-- Use the zoom buttons or `+` / `-` for extra camera control.
-- Right-drag, `Q`, or `E` rotates the camera.
-- Drag active troop and building cards onto unlocked territory.
-- Drag the Claim card onto a locked adjacent `5 x 5` territory chunk to unlock more deployment space with mana.
-- Spend spoils to unlock new cards, swap cards in and out of the active deck, and upgrade cards.
+- Left-click selects your units or buildings.
+- Left-drag box-selects your units.
+- Right-click terrain to move selected units or set a selected building rally point.
+- Right-click enemies to attack, or resources to assign selected workers.
+- Middle/right-drag pans the locked isometric RTS camera.
+- Mouse wheel zooms; `WASD` / arrow keys pan.
+- Use the doctrine buttons to steer AFK progression toward balanced, economy, military, tech, or defense.
+- Use the command bar to force-build structures, train units, or order attack/defense.
+
+## Systems
+
+- Civilizations: Verdant Concord, Iron Dominion, Sunspire League, and Umbral Nexus.
+- Economy: workers harvest food, ore, and power from resource nodes and return them to HQs/refineries.
+- Base building: HQs, refineries, barracks, solar arrays, turrets, and academies are placed automatically around each base.
+- Combat: armies path around structures, acquire nearby enemies, fire projectiles, and destroy buildings.
+- View: fixed isometric RTS camera with a procedural star-and-nebula skybox.
 
 ## Art
 
-The unit sprites use an image-generated pixel-art spritesheet that is processed into transparent `5 x 4` animation frames. Terrain and building surfaces use nearest-neighbor procedural textures so large 3D structures can be assembled from smaller blocks instead of stretched atlas faces. The launcher icon remains in `public/assets`:
-
-- `unit-sprites.png`: processed transparent unit spritesheet.
-- `game-icon.png`: source icon artwork.
-- `game-icon.ico`: Windows shortcut icon.
+Terrain uses low-resolution nearest-neighbor pixel textures. Units are generated as faction-colored 2D pixel sprites at runtime. Buildings are made from small blocky 3D pieces so faces avoid stretched textures.
