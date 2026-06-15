@@ -116,6 +116,10 @@ const formatTime = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, 
 const resourceText = (value) => Math.floor(value).toLocaleString("en-US");
 const colorHex = (value) => `#${value.toString(16).padStart(6, "0")}`;
 const distSq2 = (ax, az, bx, bz) => (ax - bx) * (ax - bx) + (az - bz) * (az - bz);
+const mapNoise = (x, z, seed = 0) => {
+  const value = Math.sin((x + 17.37) * 18.179 + (z - 4.91) * 41.233 + seed * 97.17) * 43758.5453;
+  return value - Math.floor(value);
+};
 
 const DIRECTIVES = {
   balanced: { label: "Balanced doctrine", workers: 14, army: 12, defense: 1, tech: 1, aggression: 0.58 },
@@ -171,6 +175,15 @@ const FACTION_BLUEPRINTS = [
     directive: "defense",
     bonus: { gather: 0.96, workerCost: 1, unitHp: 0.96, unitDamage: 1.08, speed: 1.14 },
   },
+];
+
+const TERRAIN_FEATURES = [
+  { x: -18, z: 18, height: 2.25, rx: 18, rz: 11 },
+  { x: 23, z: -8, height: 1.95, rx: 16, rz: 20 },
+  { x: -30, z: -18, height: 1.65, rx: 12, rz: 15 },
+  { x: 8, z: 30, height: 1.35, rx: 22, rz: 9 },
+  { x: 30, z: 24, height: 1.25, rx: 10, rz: 13 },
+  { x: -4, z: -34, height: 1.75, rx: 20, rz: 8 },
 ];
 
 const BUILDING_TYPES = {
@@ -365,6 +378,7 @@ const pointer = {
   moved: false,
   selecting: false,
   panning: false,
+  startEntity: null,
 };
 
 const keys = new Set();
@@ -496,6 +510,10 @@ function initMaterials() {
     map: createIndexedTexture("rock", ["#686c67", "#8e928a", "#414640", "#757d70"], TERRAIN_PATTERNS.rock),
     roughness: 0.96,
   });
+  materials.trunk = new THREE.MeshStandardMaterial({ color: 0x6a4324, roughness: 0.92, flatShading: true });
+  materials.leaves = new THREE.MeshStandardMaterial({ color: 0x3f8b42, roughness: 0.96, flatShading: true });
+  materials.leavesDark = new THREE.MeshStandardMaterial({ color: 0x2f6738, roughness: 0.98, flatShading: true });
+  materials.outcrop = new THREE.MeshStandardMaterial({ color: 0x747a74, roughness: 0.96, flatShading: true });
   materials.selection = new THREE.MeshBasicMaterial({
     color: 0xbce57f,
     transparent: true,
@@ -610,24 +628,33 @@ function plateauWeight(x, z) {
 }
 
 function terrainTopHeight(x, z) {
-  if (isWater(x, z)) return -0.35;
+  if (isWater(x, z)) return -0.62;
   const roll =
-    Math.sin((x + MAP_SEED) * 0.14) * 0.28 +
-    Math.cos((z - MAP_SEED) * 0.17) * 0.22 +
-    Math.sin((x * 0.08 + z * 0.14 + MAP_SEED) * 1.2) * 0.18;
+    Math.sin((x + MAP_SEED) * 0.12) * 0.46 +
+    Math.cos((z - MAP_SEED) * 0.16) * 0.38 +
+    Math.sin((x * 0.07 + z * 0.13 + MAP_SEED) * 1.18) * 0.32;
   const ridge =
-    Math.exp(-((x + 23) ** 2) / 420 - ((z - 4) ** 2) / 170) * 1.15 +
-    Math.exp(-((x - 18) ** 2) / 260 - ((z + 18) ** 2) / 360) * 0.86;
+    Math.exp(-((x + 23) ** 2) / 320 - ((z - 4) ** 2) / 120) * 1.55 +
+    Math.exp(-((x - 18) ** 2) / 220 - ((z + 18) ** 2) / 260) * 1.35;
+  const features = TERRAIN_FEATURES.reduce((sum, feature) => {
+    const dx = (x - feature.x) / feature.rx;
+    const dz = (z - feature.z) / feature.rz;
+    return sum + Math.exp(-(dx * dx + dz * dz)) * feature.height;
+  }, 0);
   const edge = Math.max(Math.abs(x), Math.abs(z)) / HALF_MAP;
-  const edgeRise = edge > 0.78 ? (edge - 0.78) * 3.6 : 0;
-  const raw = clamp(roll + ridge + edgeRise, -0.08, 2.15);
-  return lerp(raw, isShore(x, z) ? -0.04 : 0.08, plateauWeight(x, z));
+  const edgeRise = edge > 0.76 ? (edge - 0.76) * 5.2 : 0;
+  const cut = mapNoise(Math.floor(x / 4), Math.floor(z / 4), 6) > 0.64 ? 0.34 : 0;
+  const raw = clamp(roll + ridge + features + edgeRise - cut, -0.14, 4.45);
+  const terraced = Math.round(raw / 0.34) * 0.34;
+  return lerp(terraced, isShore(x, z) ? -0.12 : 0.1, plateauWeight(x, z));
 }
 
 function terrainKind(x, z) {
   if (isWater(x, z)) return "water";
   if (isShore(x, z)) return "sand";
-  if (terrainTopHeight(x, z) > 1.45) return "rock";
+  const height = terrainTopHeight(x, z);
+  if (height > 2.05) return "rock";
+  if (height > 1.05 && mapNoise(Math.floor(x), Math.floor(z), 4) > 0.34) return "dirt";
   if (Math.sin(x * 0.2 + z * 0.17) > 0.72) return "dirt";
   return "grass";
 }
@@ -685,6 +712,7 @@ function createTerrain() {
     pushSkirt(skirtBuffers, HALF_MAP, i, HALF_MAP, i + 1, terrainTopHeight(HALF_MAP, i), terrainTopHeight(HALF_MAP, i + 1));
   }
   terrainGroup.add(new THREE.Mesh(geometryFromBuffers(skirtBuffers), materials.rock));
+  createTerrainDetails();
 }
 
 function sampleTerrainHeight(x, z) {
@@ -707,6 +735,48 @@ function addBlock(group, material, x, y, z, sx, sy, sz) {
   mesh.scale.set(sx, sy, sz);
   group.add(mesh);
   return mesh;
+}
+
+function isNearFactionStart(x, z, radius = 9) {
+  return FACTION_BLUEPRINTS.some((blueprint) => distSq2(x, z, blueprint.start.x, blueprint.start.z) < radius * radius);
+}
+
+function createTreeCluster(x, z, height, scale = 1) {
+  const group = new THREE.Group();
+  addBlock(group, materials.trunk, 0, 0, 0, 0.32 * scale, 1.05 * scale, 0.32 * scale);
+  addBlock(group, materials.leaves, 0, 1.02 * scale, 0, 1.25 * scale, 0.72 * scale, 1.25 * scale);
+  addBlock(group, materials.leavesDark, -0.24 * scale, 1.52 * scale, 0.14 * scale, 0.86 * scale, 0.58 * scale, 0.86 * scale);
+  group.position.set(x, height, z);
+  terrainGroup.add(group);
+}
+
+function createRockOutcrop(x, z, height, scale = 1) {
+  const group = new THREE.Group();
+  addBlock(group, materials.outcrop, 0, 0, 0, 1.15 * scale, 0.62 * scale, 0.92 * scale);
+  addBlock(group, materials.rock, -0.34 * scale, 0.54 * scale, 0.18 * scale, 0.58 * scale, 0.52 * scale, 0.48 * scale);
+  addBlock(group, materials.outcrop, 0.44 * scale, 0.34 * scale, -0.28 * scale, 0.5 * scale, 0.44 * scale, 0.6 * scale);
+  group.rotation.y = mapNoise(x, z, 19) * Math.PI;
+  group.position.set(x, height, z);
+  terrainGroup.add(group);
+}
+
+function createTerrainDetails() {
+  for (let x = -HALF_MAP + 6; x < HALF_MAP - 6; x += 4) {
+    for (let z = -HALF_MAP + 6; z < HALF_MAP - 6; z += 4) {
+      const jitterX = (mapNoise(x, z, 1) - 0.5) * 2.2;
+      const jitterZ = (mapNoise(x, z, 2) - 0.5) * 2.2;
+      const px = x + jitterX;
+      const pz = z + jitterZ;
+      if (isWater(px, pz) || isShore(px, pz) || isNearFactionStart(px, pz, 12)) continue;
+      const height = terrainTopHeight(px, pz);
+      const noise = mapNoise(x, z, 3);
+      if (height > 2.05 && noise > 0.42) {
+        createRockOutcrop(px, pz, height, 0.75 + mapNoise(x, z, 4) * 0.65);
+      } else if (height > 0.25 && height < 2.2 && noise > 0.82) {
+        createTreeCluster(px, pz, height, 0.78 + mapNoise(x, z, 5) * 0.45);
+      }
+    }
+  }
 }
 
 function factionMaterials(faction) {
@@ -1681,6 +1751,11 @@ function hideSelectionBox() {
 
 function onPointerDown(event) {
   if (!game.started || document.body.classList.contains("menu-open")) return;
+  const startEntity = entityAtScreen(event.clientX, event.clientY);
+  const leftButton = event.button === 0;
+  const dragStartedOnOwnEntity = startEntity?.faction === playerFaction;
+  const leftDragShouldSelect = leftButton && (event.shiftKey || dragStartedOnOwnEntity);
+  const leftDragShouldPan = leftButton && !leftDragShouldSelect;
   pointer.active = true;
   pointer.button = event.button;
   pointer.startX = event.clientX;
@@ -1688,10 +1763,13 @@ function onPointerDown(event) {
   pointer.x = event.clientX;
   pointer.y = event.clientY;
   pointer.moved = false;
-  pointer.selecting = event.button === 0;
-  pointer.panning = event.button === 1 || event.button === 2;
+  pointer.startEntity = startEntity;
+  pointer.selecting = leftDragShouldSelect;
+  pointer.panning = leftDragShouldPan || event.button === 1 || event.button === 2;
   if (pointer.selecting) startSelectionBox(event.clientX, event.clientY);
+  if (pointer.selecting) canvas.classList.add("selecting");
   if (pointer.panning) canvas.classList.add("panning");
+  if (pointer.panning || event.button !== 0) event.preventDefault();
   canvas.setPointerCapture?.(event.pointerId);
 }
 
@@ -1716,15 +1794,18 @@ function onPointerUp(event) {
   pointer.active = false;
   pointer.selecting = false;
   pointer.panning = false;
-  canvas.classList.remove("panning");
+  canvas.classList.remove("panning", "selecting");
   hideSelectionBox();
   if (wasSelecting) {
     if (pointer.moved) selectInBox(pointer.startX, pointer.startY, event.clientX, event.clientY);
     else selectEntities([entityAtScreen(event.clientX, event.clientY)], event.shiftKey);
-  } else if (wasPanning && !pointer.moved && event.button === 2) {
+  } else if (wasPanning && !pointer.moved) {
     const point = screenToWorld(event.clientX, event.clientY);
-    issueOrder(point, entityAtScreen(event.clientX, event.clientY));
+    const target = entityAtScreen(event.clientX, event.clientY);
+    if (pointer.button === 2) issueOrder(point, target);
+    else if (!target || target.faction !== playerFaction) selectEntities([], event.shiftKey);
   }
+  pointer.startEntity = null;
 }
 
 function panCamera(dx, dy) {

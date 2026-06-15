@@ -20,7 +20,8 @@ npm run dev -- --host 127.0.0.1 --port 5174
 ## Controls
 
 - Left-click selects your units or buildings.
-- Left-drag box-selects your units.
+- Left-drag empty terrain pans the map.
+- Shift-left-drag or drag from one of your units to box-select.
 - Right-click terrain to move selected units or set a selected building rally point.
 - Right-click enemies to attack, or resources to assign selected workers.
 - Middle/right-drag pans the locked isometric RTS camera.

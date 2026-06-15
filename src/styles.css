@@ -35,9 +35,13 @@ body.menu-open #world {
   display: block;
   width: 100%;
   height: 100%;
-  cursor: default;
+  cursor: grab;
   image-rendering: pixelated;
   touch-action: none;
+}
+
+#world.selecting {
+  cursor: crosshair;
 }
 
 #world.panning {
