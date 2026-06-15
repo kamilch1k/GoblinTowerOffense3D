@@ -4,37 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="%BASE_URL%assets/game-icon.png" />
-    <title>AFK Dominion RTS</title>
+    <title>Goblin Tower Offense 3D</title>
   </head>
   <body>
     <div id="app">
       <canvas id="world"></canvas>
-      <div id="selectionBox" class="selection-box hidden" aria-hidden="true"></div>
 
-      <header class="top-hud" aria-label="Civilization status">
-        <section class="status-card identity">
-          <span class="status-label">Civilization</span>
-          <strong id="civName">Verdant Concord</strong>
-          <span id="directiveReadout">Balanced doctrine</span>
+      <header class="top-hud" aria-label="Battle status">
+        <section class="status-block">
+          <span class="status-label">Stronghold</span>
+          <span id="baseReadout" class="status-value">100%</span>
+          <div class="meter" aria-hidden="true"><span id="baseMeter"></span></div>
         </section>
-        <section class="resource-strip" aria-label="Resources">
-          <div><span>Food</span><strong id="foodReadout">0</strong></div>
-          <div><span>Ore</span><strong id="oreReadout">0</strong></div>
-          <div><span>Power</span><strong id="powerReadout">0</strong></div>
-          <div><span>Supply</span><strong id="supplyReadout">0 / 0</strong></div>
+        <section class="status-block">
+          <span class="status-label">Mana</span>
+          <span id="rageReadout" class="status-value">0 / 10</span>
+          <div class="meter rage" aria-hidden="true"><span id="rageMeter"></span></div>
         </section>
-        <section class="status-card">
-          <span class="status-label">HQ Integrity</span>
-          <strong id="hqReadout">100%</strong>
-          <div class="meter" aria-hidden="true"><span id="hqMeter"></span></div>
-        </section>
-        <section class="status-card compact">
-          <span class="status-label">Clock</span>
-          <strong id="timeReadout">00:00</strong>
+        <section class="status-block compact">
+          <span class="status-label">Raid</span>
+          <span id="raidReadout" class="status-value">00:00</span>
         </section>
       </header>
 
       <nav class="camera-tools" aria-label="Camera controls">
+        <button id="rotateLeft" class="icon-button" title="Rotate left" aria-label="Rotate left">
+          <i data-lucide="rotate-ccw"></i>
+        </button>
+        <button id="rotateRight" class="icon-button" title="Rotate right" aria-label="Rotate right">
+          <i data-lucide="rotate-cw"></i>
+        </button>
         <button id="resetView" class="icon-button" title="Reset view" aria-label="Reset view">
           <i data-lucide="home"></i>
         </button>
@@ -49,114 +48,67 @@
         </button>
       </nav>
 
-      <aside class="left-panel" aria-label="Civilization controls">
-        <section class="panel-section">
-          <div class="section-heading">
-            <span>Doctrine</span>
-            <strong id="afkState">AFK On</strong>
-          </div>
-          <div id="directiveButtons" class="segmented-controls" role="group" aria-label="Progression direction">
-            <button type="button" data-directive="balanced" class="active">Balanced</button>
-            <button type="button" data-directive="economy">Economy</button>
-            <button type="button" data-directive="military">Military</button>
-            <button type="button" data-directive="tech">Tech</button>
-            <button type="button" data-directive="defense">Defense</button>
-          </div>
-        </section>
-        <section class="panel-section">
-          <div class="section-heading">
-            <span>Selected</span>
-            <strong id="selectedCount">0</strong>
-          </div>
-          <h2 id="selectedTitle">No selection</h2>
-          <p id="selectedBody">Left-click or drag-select your units. Right-click the map or an enemy to issue direct orders.</p>
-        </section>
-        <section class="panel-section">
-          <div class="section-heading">
-            <span>Civilizations</span>
-            <strong id="aliveReadout">4 alive</strong>
-          </div>
-          <div id="civList" class="civ-list"></div>
-        </section>
-      </aside>
-
-      <aside class="right-panel" aria-label="Match log">
-        <section class="panel-section">
-          <div class="section-heading">
-            <span>Stats</span>
-            <strong id="armyReadout">0 army</strong>
-          </div>
-          <div class="stat-grid compact-stats">
-            <div><span>Workers</span><strong id="workerReadout">0</strong></div>
-            <div><span>Buildings</span><strong id="buildingReadout">0</strong></div>
-            <div><span>Kills</span><strong id="killsReadout">0</strong></div>
-            <div><span>Losses</span><strong id="lossesReadout">0</strong></div>
-          </div>
-        </section>
-        <section class="panel-section log-section">
-          <div class="section-heading">
-            <span>Event Log</span>
-            <strong id="winnerReadout">Skirmish</strong>
-          </div>
-          <ol id="eventLog" class="event-log" aria-live="polite"></ol>
-        </section>
+      <aside class="war-panel" aria-label="Raid details">
+        <div class="panel-row">
+          <span>Goblins</span>
+          <strong id="hordeReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Defenders</span>
+          <strong id="defenderReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Structures</span>
+          <strong id="structureReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Spoils</span>
+          <strong id="spoilsReadout">0</strong>
+        </div>
+        <div class="panel-row">
+          <span>Territory</span>
+          <strong id="territoryReadout">0</strong>
+        </div>
       </aside>
 
       <main id="battleMessage" class="battle-message" aria-live="polite"></main>
 
-      <section class="command-bar" aria-label="RTS commands">
-        <div class="command-group">
-          <button type="button" data-build="refinery"><i data-lucide="pickaxe"></i><span>Refinery</span></button>
-          <button type="button" data-build="barracks"><i data-lucide="hammer"></i><span>Barracks</span></button>
-          <button type="button" data-build="solar"><i data-lucide="zap"></i><span>Solar</span></button>
-          <button type="button" data-build="turret"><i data-lucide="shield"></i><span>Turret</span></button>
-          <button type="button" data-build="academy"><i data-lucide="factory"></i><span>Academy</span></button>
-        </div>
-        <div class="command-group">
-          <button type="button" data-train="worker"><i data-lucide="users"></i><span>Worker</span></button>
-          <button type="button" data-train="scout"><i data-lucide="map"></i><span>Scout</span></button>
-          <button type="button" data-train="soldier"><i data-lucide="swords"></i><span>Soldier</span></button>
-          <button type="button" data-train="siege"><i data-lucide="crosshair"></i><span>Siege</span></button>
-        </div>
-        <div class="command-group">
-          <button id="attackOrder" type="button"><i data-lucide="swords"></i><span>Attack</span></button>
-          <button id="defendOrder" type="button"><i data-lucide="shield"></i><span>Defend</span></button>
-        </div>
-      </section>
+      <section id="deck" class="deck" aria-label="Troop cards"></section>
 
       <section id="mainMenu" class="menu-screen main-menu" aria-label="Main menu">
         <div class="menu-panel">
-          <p class="menu-kicker">Persistent skirmish table</p>
-          <h1>AFK Dominion RTS</h1>
-          <p class="menu-copy">Four civilizations expand, harvest, research, and fight on their own. You rule the Verdant Concord by steering doctrine or directly commanding units.</p>
+          <p class="menu-kicker">Goblin command table</p>
+          <h1>Goblin Tower Offense 3D</h1>
           <div class="menu-actions">
-            <button id="startSkirmish" class="menu-button primary" type="button">Start Skirmish</button>
+            <button id="startRaid" class="menu-button primary" type="button">Start Raid</button>
           </div>
-          <div class="stat-grid" aria-label="Best stats">
-            <div><span>Sessions</span><strong id="menuSessions">0</strong></div>
+          <div class="stats-grid" aria-label="Raid stats">
             <div><span>Best Time</span><strong id="menuBestTime">00:00</strong></div>
-            <div><span>Best Kills</span><strong id="menuBestKills">0</strong></div>
-            <div><span>Wins</span><strong id="menuWins">0</strong></div>
+            <div><span>Best Spoils</span><strong id="menuBestSpoils">0</strong></div>
+            <div><span>Best Damage</span><strong id="menuBestDamage">0</strong></div>
+            <div><span>Raids</span><strong id="menuRaids">0</strong></div>
           </div>
         </div>
       </section>
 
       <section id="pauseMenu" class="menu-screen pause-menu hidden" aria-label="Pause menu">
         <div class="menu-panel">
-          <p class="menu-kicker">Simulation paused</p>
-          <h2>Command Room</h2>
+          <p class="menu-kicker">Raid paused</p>
+          <h2>Battle Orders</h2>
           <div class="menu-actions">
-            <button id="resumeGame" class="menu-button primary" type="button">Resume</button>
-            <button id="restartGame" class="menu-button" type="button">Restart</button>
+            <button id="resumeRaid" class="menu-button primary" type="button">Resume</button>
+            <button id="restartRaid" class="menu-button" type="button">Restart</button>
             <button id="exitToMenu" class="menu-button danger" type="button">Main Menu</button>
           </div>
-          <div class="stat-grid live" aria-label="Current game stats">
+          <div class="stats-grid live" aria-label="Current raid stats">
             <div><span>Time</span><strong id="statTime">00:00</strong></div>
-            <div><span>Kills</span><strong id="statKills">0</strong></div>
-            <div><span>Losses</span><strong id="statLosses">0</strong></div>
+            <div><span>Spoils</span><strong id="statSpoils">0</strong></div>
+            <div><span>Damage</span><strong id="statDamage">0</strong></div>
+            <div><span>Structures</span><strong id="statStructures">0</strong></div>
+            <div><span>Defeated</span><strong id="statDefeated">0</strong></div>
+            <div><span>Lost</span><strong id="statLost">0</strong></div>
+            <div><span>Spawned</span><strong id="statSpawned">0</strong></div>
             <div><span>Buildings</span><strong id="statBuildings">0</strong></div>
-            <div><span>Army</span><strong id="statArmy">0</strong></div>
-            <div><span>Workers</span><strong id="statWorkers">0</strong></div>
           </div>
         </div>
       </section>

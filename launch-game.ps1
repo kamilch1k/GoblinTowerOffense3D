@@ -1,5 +1,5 @@
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$candidatePorts = @(5173, 5174, 5175, 5176)
+$port = 5173
 
 function Test-PortOpen {
   param([int]$Port)
@@ -19,36 +19,9 @@ function Test-PortOpen {
   }
 }
 
-function Test-GameServer {
-  param([int]$Port)
-
-  try {
-    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port" -TimeoutSec 1
-    return $response.Content -like "*AFK Dominion RTS*"
-  } catch {
-    return $false
-  }
-}
-
-$port = $null
-foreach ($candidate in $candidatePorts) {
-  if (Test-GameServer -Port $candidate) {
-    $port = $candidate
-    break
-  }
-  if (-not (Test-PortOpen -Port $candidate)) {
-    $port = $candidate
-    break
-  }
-}
-
-if ($null -eq $port) {
-  $port = 5177
-}
-
-if (-not (Test-GameServer -Port $port)) {
+if (-not (Test-PortOpen -Port $port)) {
   $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
-  Start-Process -FilePath $npm -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "$port") -WorkingDirectory $projectRoot -WindowStyle Hidden
+  Start-Process -FilePath $npm -ArgumentList @("run", "dev", "--", "--port", "$port") -WorkingDirectory $projectRoot -WindowStyle Hidden
   Start-Sleep -Seconds 3
 }
 
